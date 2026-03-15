@@ -12,6 +12,7 @@ class Notebook:
 class Cell:
     id: int
     notebook_id: int
+    cell_type: str  # "code" or "markdown"
     input: str
     output: str = ""
     status: str = ""  # "", "ok", "error"

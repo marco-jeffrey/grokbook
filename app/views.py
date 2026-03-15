@@ -1,5 +1,6 @@
 import html as _e
 
+from markdown_it import MarkdownIt
 from stario.datastar import DatastarScript, at, data
 from stario.html import (
     Body,
@@ -18,6 +19,8 @@ from stario.html import (
 )
 
 from app.state import Cell, Notebook
+
+_md = MarkdownIt("gfm-like")
 
 # ── JS ────────────────────────────────────────────────────────────────────────
 
@@ -419,7 +422,7 @@ def execution_indicator():
     )
 
 
-def cell_view(cell: Cell):
+def _code_cell_view(cell: Cell):
     is_error = cell.status == "error"
     out_class = (
         "mt-2 rounded-lg border border-red-900 bg-red-950 p-4 font-mono "
@@ -482,18 +485,83 @@ def cell_view(cell: Cell):
     )
 
 
+def _markdown_cell_view(cell: Cell):
+    sig = f"cell_{cell.id}"
+    rendered = _md.render(cell.input) if cell.input else "<p class='text-zinc-600 italic'>empty markdown cell</p>"
+    return Div(
+        {"class": "mb-6 group"},
+        data.signals({sig: cell.input}),
+        # Rendered markdown (click to edit)
+        Div(
+            {
+                "id": f"md-display-{cell.id}",
+                "class": "prose prose-invert prose-sm max-w-none p-4 rounded-lg "
+                "border border-zinc-800 hover:border-zinc-600 transition-colors cursor-text",
+                "data-on:dblclick": f"document.getElementById('md-edit-{cell.id}').classList.remove('hidden');"
+                f"document.getElementById('md-display-{cell.id}').classList.add('hidden');"
+                f"document.querySelector('#md-edit-{cell.id} textarea').focus()",
+            },
+            SafeString(rendered),
+        ),
+        # Edit mode (hidden by default)
+        Div(
+            {
+                "id": f"md-edit-{cell.id}",
+                "class": "hidden",
+            },
+            Textarea(
+                cell.input,
+                data.bind(sig),
+                {
+                    "data-cell-id": str(cell.id),
+                    "spellcheck": "false",
+                    "class": (
+                        "w-full min-h-32 p-3 bg-zinc-900 border border-zinc-700 rounded-lg "
+                        "text-zinc-200 font-mono text-sm leading-relaxed resize-y outline-none "
+                        "focus:border-indigo-500 transition-colors"
+                    ),
+                },
+            ),
+            Div(
+                {"class": "mt-1 text-xs text-zinc-600"},
+                "shift+enter to save · double-click rendered text to edit",
+            ),
+        ),
+        # Hidden button — Shift+Enter saves markdown and re-renders
+        Button(
+            data.on("click", at.post(f"/cells/save-md/{cell.id}", include=[sig])),
+            {"id": f"run-btn-{cell.id}", "class": "hidden"},
+        ),
+    )
+
+
+def cell_view(cell: Cell):
+    if cell.cell_type == "markdown":
+        return _markdown_cell_view(cell)
+    return _code_cell_view(cell)
+
+
 def notebook(cells: list[Cell], nb_id: int):
     """Full notebook div — SSE-patched on every change."""
+    btn_class = (
+        "px-4 py-1.5 border border-zinc-700 text-zinc-400 rounded-md "
+        "text-sm hover:border-indigo-500 hover:text-indigo-400 transition-colors cursor-pointer"
+    )
     return Div(
         {"id": "notebook", "class": "w-full max-w-3xl"},
         *[cell_view(c) for c in cells],
-        Button(
-            data.on("click", at.post("/cells/new", include=["notebook_id"])),
-            {
-                "class": "mt-2 px-4 py-1.5 border border-zinc-700 text-zinc-400 rounded-md "
-                "text-sm hover:border-indigo-500 hover:text-indigo-400 transition-colors cursor-pointer",
-            },
-            "+ New Cell",
+        Div(
+            {"class": "mt-2 flex gap-2"},
+            Button(
+                data.on("click", at.post("/cells/new", include=["notebook_id"])),
+                {"class": btn_class},
+                "+ Code",
+            ),
+            Button(
+                data.on("click", at.post("/cells/new-md", include=["notebook_id"])),
+                {"class": btn_class},
+                "+ Markdown",
+            ),
         ),
     )
 
@@ -505,7 +573,7 @@ def page(nb: Notebook, notebooks: list[Notebook], cells: list[Cell]):
             Meta({"charset": "utf-8"}),
             Meta({"name": "viewport", "content": "width=device-width, initial-scale=1"}),
             Title(f"{nb.name} — nb-staroid"),
-            Script({"src": "https://cdn.tailwindcss.com"}),
+            Script({"src": "https://cdn.tailwindcss.com?plugins=typography"}),
             Script({"src": "https://cdn.jsdelivr.net/npm/textarea-caret@3.1.0/index.js"}),
             DatastarScript(),
         ),

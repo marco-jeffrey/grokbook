@@ -121,9 +121,29 @@ def app_router(db: Database, pool: KernelPool) -> Router:
     async def add_cell(c: Context, w: Writer) -> None:
         signals = await get_signals(c.req)
         nb_id = int(signals.get("notebook_id", 0))
-        new_id = await db.insert_cell(nb_id)
+        new_id = await db.insert_cell(nb_id, cell_type="code")
         await _patch_notebook(w, nb_id)
         w.sync({"focus_cell": str(new_id)})
+
+    async def add_md_cell(c: Context, w: Writer) -> None:
+        signals = await get_signals(c.req)
+        nb_id = int(signals.get("notebook_id", 0))
+        await db.insert_cell(nb_id, cell_type="markdown")
+        await _patch_notebook(w, nb_id)
+
+    async def save_md_cell(c: Context, w: Writer) -> None:
+        """Save markdown cell content and re-render notebook."""
+        try:
+            cell_id = int(c.req.tail)
+        except ValueError:
+            w.text("Not Found", 404)
+            return
+        signals = await get_signals(c.req)
+        code = signals.get(f"cell_{cell_id}", "")
+        await db.update_input(cell_id, code)
+        nb_id = await db.get_cell_notebook_id(cell_id)
+        if nb_id:
+            await _patch_notebook(w, nb_id)
 
     async def _run_and_save(cell_id: int, nb_id: int, code: str) -> str:
         """Execute code and write result to DB. Always runs to completion."""
@@ -218,6 +238,8 @@ def app_router(db: Database, pool: KernelPool) -> Router:
     router.post("/nb/duplicate/*", nb_duplicate)
     router.post("/nb/delete/*", nb_delete)
     router.post("/cells/new", add_cell)
+    router.post("/cells/new-md", add_md_cell)
+    router.post("/cells/save-md/*", save_md_cell)
     router.post("/cells/execute/*", execute_cell)
     router.post("/cells/save/*", save_cell)
     router.post("/kernel/restart", kernel_restart)

@@ -16,11 +16,23 @@ CREATE TABLE IF NOT EXISTS cells (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
     order_index INTEGER NOT NULL DEFAULT 0,
+    cell_type   TEXT NOT NULL DEFAULT 'code',
     input       TEXT NOT NULL DEFAULT '',
     output      TEXT NOT NULL DEFAULT '',
     status      TEXT NOT NULL DEFAULT ''
 )
 """
+
+
+def _row_to_cell(r) -> Cell:
+    return Cell(
+        id=r["id"],
+        notebook_id=r["notebook_id"],
+        cell_type=r["cell_type"] if "cell_type" in r.keys() else "code",
+        input=r["input"],
+        output=r["output"],
+        status=r["status"],
+    )
 
 
 class Database:
@@ -48,6 +60,7 @@ class Database:
                 ("notebook_id", "0"),
                 ("order_index", "0"),
                 ("status", "''"),
+                ("cell_type", "'code'"),
             ]:
                 try:
                     await conn.execute(
@@ -137,9 +150,9 @@ class Database:
         cells = await self.get_all_cells(nb_id)
         for i, cell in enumerate(cells):
             await self._conn.execute(
-                "INSERT INTO cells (notebook_id, order_index, input, output, status) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (new_id, i, cell.input, cell.output, cell.status),
+                "INSERT INTO cells (notebook_id, order_index, cell_type, input, output, status) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (new_id, i, cell.cell_type, cell.input, cell.output, cell.status),
             )
         await self._conn.commit()
         return new_id
@@ -154,23 +167,22 @@ class Database:
 
     async def get_all_cells(self, notebook_id: int) -> list[Cell]:
         async with self._conn.execute(
-            "SELECT id, notebook_id, input, output, status FROM cells "
+            "SELECT id, notebook_id, cell_type, input, output, status FROM cells "
             "WHERE notebook_id = ? ORDER BY order_index",
             (notebook_id,),
         ) as cur:
             rows = await cur.fetchall()
-        return [
-            Cell(
-                id=r["id"],
-                notebook_id=r["notebook_id"],
-                input=r["input"],
-                output=r["output"],
-                status=r["status"],
-            )
-            for r in rows
-        ]
+        return [_row_to_cell(r) for r in rows]
 
-    async def insert_cell(self, notebook_id: int) -> int:
+    async def get_cell(self, cell_id: int) -> Cell | None:
+        async with self._conn.execute(
+            "SELECT id, notebook_id, cell_type, input, output, status FROM cells WHERE id = ?",
+            (cell_id,),
+        ) as cur:
+            r = await cur.fetchone()
+        return _row_to_cell(r) if r else None
+
+    async def insert_cell(self, notebook_id: int, cell_type: str = "code") -> int:
         async with self._conn.execute(
             "SELECT COALESCE(MAX(order_index), -1) + 1 AS next_ord "
             "FROM cells WHERE notebook_id = ?",
@@ -178,8 +190,8 @@ class Database:
         ) as cur:
             r = await cur.fetchone()
         cur = await self._conn.execute(
-            "INSERT INTO cells (notebook_id, order_index) VALUES (?, ?)",
-            (notebook_id, r["next_ord"]),
+            "INSERT INTO cells (notebook_id, order_index, cell_type) VALUES (?, ?, ?)",
+            (notebook_id, r["next_ord"], cell_type),
         )
         await self._conn.commit()
         return cur.lastrowid
@@ -197,6 +209,10 @@ class Database:
         await self._conn.execute(
             "UPDATE cells SET input = ? WHERE id = ?", (input, cell_id)
         )
+        await self._conn.commit()
+
+    async def delete_cell(self, cell_id: int) -> None:
+        await self._conn.execute("DELETE FROM cells WHERE id = ?", (cell_id,))
         await self._conn.commit()
 
     async def get_cell_notebook_id(self, cell_id: int) -> int | None:
