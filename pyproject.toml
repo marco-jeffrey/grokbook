@@ -1,0 +1,16 @@
+[project]
+name = "nb-staroid"
+version = "0.1.0"
+description = "Lightweight notebook server with IPython kernel integration"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "stario",
+    "jupyter-client>=8.0.0",
+    "ipykernel>=6.25.0",
+    "aiosqlite>=0.20.0",
+    "watchfiles>=1.1.1",
+]
+
+[tool.uv.sources]
+stario = { path = "stario", editable = true }
