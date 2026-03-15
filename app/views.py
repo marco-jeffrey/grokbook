@@ -2,7 +2,6 @@ import html as _e
 
 from stario.datastar import DatastarScript, at, data
 from stario.html import (
-    A,
     Body,
     Button,
     Div,
@@ -260,19 +259,21 @@ def header_bar():
 def sidebar_view(active_id: int, notebooks: list[Notebook]):
     return Div(
         {
+            "id": "sidebar",
             "class": "fixed left-0 top-12 w-56 h-[calc(100vh-3rem)] bg-zinc-900 "
-            "border-r border-zinc-800 p-4 overflow-y-auto z-30"
+            "border-r border-zinc-800 p-4 overflow-y-auto z-30",
         },
         Div(
             {"class": "text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3"},
             "Notebooks",
         ),
         *[
-            A(
+            Button(
+                data.on("click", at.post(f"/nb/switch/{nb.id}")),
                 {
-                    "href": f"/nb/{nb.id}",
                     "class": (
-                        "block px-3 py-2 rounded-md text-sm mb-1 truncate transition-colors "
+                        "block w-full text-left px-3 py-2 rounded-md text-sm mb-1 truncate "
+                        "transition-colors cursor-pointer "
                         + (
                             "bg-indigo-600/20 text-indigo-300 border border-indigo-600/30"
                             if nb.id == active_id
@@ -425,6 +426,7 @@ def page(nb: Notebook, notebooks: list[Notebook], cells: list[Cell]):
                     "kernel_state": "idle",
                 }
             ),
+            data.effect("document.body.dataset.notebookId=String($notebook_id)"),
             data.effect(
                 "if($focus_cell){"
                 "var el=document.querySelector('textarea[data-cell-id=\"'+$focus_cell+'\"]');"

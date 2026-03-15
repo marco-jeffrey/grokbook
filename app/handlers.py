@@ -4,7 +4,7 @@ from stario.http.types import Context, Writer
 
 from app.db import Database
 from app.kernel import KernelPool
-from app.views import notebook, page
+from app.views import notebook, page, sidebar_view
 
 
 def app_router(db: Database, pool: KernelPool) -> Router:
@@ -32,11 +32,31 @@ def app_router(db: Database, pool: KernelPool) -> Router:
         cells = await db.get_all_cells(nb_id)
         w.html(page(nb, notebooks, cells))
 
-    # ── notebooks ─────────────────────────────────────────────────────────
+    # ── notebook switching ────────────────────────────────────────────────
+
+    async def _patch_all(w: Writer, nb_id: int) -> None:
+        """Patch notebook content + sidebar + sync notebook_id signal."""
+        notebooks = await db.get_all_notebooks()
+        cells = await db.get_all_cells(nb_id)
+        w.patch(element=notebook(cells, nb_id), selector="#notebook")
+        w.patch(element=sidebar_view(nb_id, notebooks), selector="#sidebar")
+        w.sync({"notebook_id": nb_id, "last_status": "", "focus_cell": ""})
+
+    async def switch_notebook(c: Context, w: Writer) -> None:
+        try:
+            nb_id = int(c.req.tail)
+        except ValueError:
+            w.text("Not Found", 404)
+            return
+        nb = await db.get_notebook(nb_id)
+        if not nb:
+            w.text("Not Found", 404)
+            return
+        await _patch_all(w, nb_id)
 
     async def new_notebook(c: Context, w: Writer) -> None:
         nb_id = await db.create_notebook()
-        w.navigate(f"/nb/{nb_id}")
+        await _patch_all(w, nb_id)
 
     # ── cells ─────────────────────────────────────────────────────────────
 
@@ -127,6 +147,7 @@ def app_router(db: Database, pool: KernelPool) -> Router:
     router.get("/", index)
     router.get("/nb/*", nb_page)
     router.post("/nb/new", new_notebook)
+    router.post("/nb/switch/*", switch_notebook)
     router.post("/cells/new", add_cell)
     router.post("/cells/execute/*", execute_cell)
     router.post("/cells/save/*", save_cell)
