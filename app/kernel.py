@@ -1,5 +1,6 @@
 import asyncio
 import re
+from queue import Empty
 
 from jupyter_client import AsyncKernelManager as _KM
 
@@ -45,7 +46,7 @@ class KernelManager:
                         outputs.append("\n".join(_ANSI.sub("", line) for line in tb))
                     elif t == "status" and msg["content"]["execution_state"] == "idle":
                         break
-                except TimeoutError:
+                except (TimeoutError, Empty):
                     outputs.append("(execution timed out)")
                     is_error = True
                     break
@@ -64,7 +65,7 @@ class KernelManager:
                         if c.get("found"):
                             return _ANSI.sub("", c.get("data", {}).get("text/plain", ""))
                         return ""
-                except TimeoutError:
+                except (TimeoutError, Empty):
                     break
             return ""
 
@@ -82,7 +83,7 @@ class KernelManager:
                             "cursor_start": c.get("cursor_start", cursor_pos),
                             "cursor_end": c.get("cursor_end", cursor_pos),
                         }
-                except TimeoutError:
+                except (TimeoutError, Empty):
                     break
             return {"matches": [], "cursor_start": cursor_pos, "cursor_end": cursor_pos}
 
