@@ -7,6 +7,7 @@ from stario.html import (
     Div,
     Head,
     Html,
+    Input,
     Meta,
     Pre,
     SafeString,
@@ -256,7 +257,120 @@ def header_bar():
     )
 
 
-def sidebar_view(active_id: int, notebooks: list[Notebook]):
+def _nb_item(nb: Notebook, active_id: int):
+    """Normal sidebar notebook item with ⋯ menu button."""
+    is_active = nb.id == active_id
+    return Div(
+        {"class": "relative group mb-1"},
+        Button(
+            data.on("click", at.post(f"/nb/switch/{nb.id}")),
+            {
+                "class": (
+                    "block w-full text-left px-3 py-2 pr-8 rounded-md text-sm truncate "
+                    "transition-colors cursor-pointer "
+                    + (
+                        "bg-indigo-600/20 text-indigo-300 border border-indigo-600/30"
+                        if is_active
+                        else "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                    )
+                ),
+            },
+            nb.name,
+        ),
+        Button(
+            data.on("click", at.post(f"/nb/menu/{nb.id}")),
+            {
+                "class": "absolute right-1 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded "
+                "text-zinc-600 hover:text-zinc-300 hover:bg-zinc-700 opacity-0 "
+                "group-hover:opacity-100 transition-opacity cursor-pointer text-xs",
+            },
+            "⋯",
+        ),
+    )
+
+
+def _nb_item_menu(nb: Notebook, active_id: int):
+    """Notebook item with dropdown menu open."""
+    is_active = nb.id == active_id
+    btn = (
+        "block w-full text-left px-3 py-1.5 text-sm text-zinc-300 "
+        "hover:bg-zinc-700 rounded cursor-pointer"
+    )
+    return Div(
+        {"class": "relative mb-1"},
+        Button(
+            {
+                "class": (
+                    "block w-full text-left px-3 py-2 pr-8 rounded-md text-sm truncate "
+                    + (
+                        "bg-indigo-600/20 text-indigo-300 border border-indigo-600/30"
+                        if is_active
+                        else "bg-zinc-800 text-zinc-200"
+                    )
+                ),
+            },
+            nb.name,
+        ),
+        # Dropdown
+        Div(
+            {
+                "class": "absolute left-0 top-full mt-1 w-full bg-zinc-800 border border-zinc-600 "
+                "rounded-lg shadow-xl z-50 py-1"
+            },
+            Button(data.on("click", at.post(f"/nb/rename-mode/{nb.id}")), {"class": btn}, "Rename"),
+            Button(data.on("click", at.post(f"/nb/duplicate/{nb.id}")), {"class": btn}, "Duplicate"),
+            Button(
+                data.on("click", at.post(f"/nb/delete/{nb.id}")),
+                {
+                    "class": "block w-full text-left px-3 py-1.5 text-sm text-red-400 "
+                    "hover:bg-zinc-700 rounded cursor-pointer"
+                },
+                "Delete",
+            ),
+        ),
+        # Click-away overlay
+        Div(
+            data.on("click", at.post(f"/nb/menu-close")),
+            {"class": "fixed inset-0 z-40", "style": "cursor: default"},
+        ),
+    )
+
+
+def _nb_item_rename(nb: Notebook):
+    """Notebook item in rename mode — input field."""
+    sig = f"rename_{nb.id}"
+    return Div(
+        {"class": "mb-1"},
+        data.signals({sig: nb.name}),
+        Input(
+            data.bind(sig),
+            {
+                "type": "text",
+                "autofocus": True,
+                "data-on-keydown": f"if(event.key==='Enter'){{{at.post(f'/nb/rename/{nb.id}', include=[sig])}}};"
+                f"if(event.key==='Escape'){{{at.post('/nb/menu-close')}}}",
+                "class": "w-full px-3 py-2 rounded-md text-sm bg-zinc-800 border border-indigo-500 "
+                "text-zinc-200 outline-none",
+            },
+        ),
+    )
+
+
+def sidebar_view(
+    active_id: int,
+    notebooks: list[Notebook],
+    menu_id: int | None = None,
+    renaming_id: int | None = None,
+):
+    items = []
+    for nb in notebooks:
+        if renaming_id == nb.id:
+            items.append(_nb_item_rename(nb))
+        elif menu_id == nb.id:
+            items.append(_nb_item_menu(nb, active_id))
+        else:
+            items.append(_nb_item(nb, active_id))
+
     return Div(
         {
             "id": "sidebar",
@@ -267,24 +381,7 @@ def sidebar_view(active_id: int, notebooks: list[Notebook]):
             {"class": "text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3"},
             "Notebooks",
         ),
-        *[
-            Button(
-                data.on("click", at.post(f"/nb/switch/{nb.id}")),
-                {
-                    "class": (
-                        "block w-full text-left px-3 py-2 rounded-md text-sm mb-1 truncate "
-                        "transition-colors cursor-pointer "
-                        + (
-                            "bg-indigo-600/20 text-indigo-300 border border-indigo-600/30"
-                            if nb.id == active_id
-                            else "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-                        )
-                    ),
-                },
-                nb.name,
-            )
-            for nb in notebooks
-        ],
+        *items,
         Button(
             data.on("click", at.post("/nb/new")),
             {

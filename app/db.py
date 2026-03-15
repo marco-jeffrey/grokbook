@@ -118,6 +118,32 @@ class Database:
             r = await cur.fetchone()
         return r["id"] if r else None
 
+    async def rename_notebook(self, nb_id: int, name: str) -> None:
+        await self._conn.execute(
+            "UPDATE notebooks SET name = ?, updated_at = datetime('now') WHERE id = ?",
+            (name, nb_id),
+        )
+        await self._conn.commit()
+
+    async def delete_notebook(self, nb_id: int) -> None:
+        await self._conn.execute("DELETE FROM cells WHERE notebook_id = ?", (nb_id,))
+        await self._conn.execute("DELETE FROM notebooks WHERE id = ?", (nb_id,))
+        await self._conn.commit()
+
+    async def duplicate_notebook(self, nb_id: int) -> int:
+        nb = await self.get_notebook(nb_id)
+        name = f"{nb.name} (copy)" if nb else "Untitled (copy)"
+        new_id = await self.create_notebook(name)
+        cells = await self.get_all_cells(nb_id)
+        for i, cell in enumerate(cells):
+            await self._conn.execute(
+                "INSERT INTO cells (notebook_id, order_index, input, output, status) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (new_id, i, cell.input, cell.output, cell.status),
+            )
+        await self._conn.commit()
+        return new_id
+
     async def touch_notebook(self, nb_id: int) -> None:
         await self._conn.execute(
             "UPDATE notebooks SET updated_at = datetime('now') WHERE id = ?", (nb_id,)
