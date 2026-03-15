@@ -20,7 +20,8 @@ class KernelManager:
         await self._kc.wait_for_ready(timeout=30)
 
     async def execute(self, code: str) -> tuple[str, bool]:
-        """Execute code in the persistent kernel. Serialised via lock."""
+        """Execute code in the persistent kernel. Serialised via lock.
+        No arbitrary timeout — waits as long as the kernel is alive."""
         async with self._lock:
             msg_id = self._kc.execute(code)
             outputs: list[str] = []
@@ -28,27 +29,31 @@ class KernelManager:
 
             while True:
                 try:
-                    msg = await self._kc.get_iopub_msg(timeout=30)
-                    # Skip messages from other requests (e.g. kernel startup)
-                    if msg["parent_header"].get("msg_id") != msg_id:
-                        continue
-                    t = msg["msg_type"]
-                    if t == "stream":
-                        outputs.append(msg["content"]["text"])
-                    elif t == "execute_result":
-                        outputs.append(msg["content"]["data"].get("text/plain", ""))
-                    elif t == "display_data":
-                        if "text/plain" in msg["content"]["data"]:
-                            outputs.append(msg["content"]["data"]["text/plain"])
-                    elif t == "error":
-                        is_error = True
-                        tb = msg["content"]["traceback"]
-                        outputs.append("\n".join(_ANSI.sub("", line) for line in tb))
-                    elif t == "status" and msg["content"]["execution_state"] == "idle":
-                        break
+                    msg = await self._kc.get_iopub_msg(timeout=1)
                 except (TimeoutError, Empty):
-                    outputs.append("(execution timed out)")
+                    # No message yet — check if kernel is still alive
+                    if not await self._km.is_alive():
+                        outputs.append("(kernel died during execution)")
+                        is_error = True
+                        break
+                    continue
+
+                # Skip messages from other requests (e.g. kernel startup)
+                if msg["parent_header"].get("msg_id") != msg_id:
+                    continue
+                t = msg["msg_type"]
+                if t == "stream":
+                    outputs.append(msg["content"]["text"])
+                elif t == "execute_result":
+                    outputs.append(msg["content"]["data"].get("text/plain", ""))
+                elif t == "display_data":
+                    if "text/plain" in msg["content"]["data"]:
+                        outputs.append(msg["content"]["data"]["text/plain"])
+                elif t == "error":
                     is_error = True
+                    tb = msg["content"]["traceback"]
+                    outputs.append("\n".join(_ANSI.sub("", line) for line in tb))
+                elif t == "status" and msg["content"]["execution_state"] == "idle":
                     break
 
             return "".join(outputs) or "(no output)", is_error

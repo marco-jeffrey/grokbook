@@ -1,3 +1,5 @@
+import asyncio
+
 from stario.datastar.signals import get_signals
 from stario.http import Router
 from stario.http.types import Context, Writer
@@ -123,6 +125,15 @@ def app_router(db: Database, pool: KernelPool) -> Router:
         await _patch_notebook(w, nb_id)
         w.sync({"focus_cell": str(new_id)})
 
+    async def _run_and_save(cell_id: int, nb_id: int, code: str) -> str:
+        """Execute code and write result to DB. Always runs to completion."""
+        km = await pool.get(nb_id)
+        output, is_error = await km.execute(code)
+        status = "error" if is_error else "ok"
+        await db.update_cell(cell_id, input=code, output=output, status=status)
+        await db.touch_notebook(nb_id)
+        return status
+
     async def execute_cell(c: Context, w: Writer) -> None:
         try:
             cell_id = int(c.req.tail)
@@ -137,12 +148,12 @@ def app_router(db: Database, pool: KernelPool) -> Router:
         signals = await get_signals(c.req)
         code = signals.get(f"cell_{cell_id}", "")
 
-        km = await pool.get(nb_id)
-        output, is_error = await km.execute(code)
-        status = "error" if is_error else "ok"
-
-        await db.update_cell(cell_id, input=code, output=output, status=status)
-        await db.touch_notebook(nb_id)
+        # Shield so execution + DB write complete even if connection drops
+        task = asyncio.create_task(_run_and_save(cell_id, nb_id, code))
+        try:
+            status = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            return  # connection dropped, task keeps running in background
 
         next_id = await db.get_next_cell_id(cell_id)
         await _patch_notebook(w, nb_id)
