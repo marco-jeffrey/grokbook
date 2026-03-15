@@ -426,9 +426,9 @@ def page(nb: Notebook, notebooks: list[Notebook], cells: list[Cell]):
                 }
             ),
             data.effect(
-                "if(focus_cell){"
-                "var el=document.querySelector('textarea[data-cell-id=\"'+focus_cell+'\"]');"
-                "if(el){el.focus();}focus_cell='';}"
+                "if($focus_cell){"
+                "var el=document.querySelector('textarea[data-cell-id=\"'+$focus_cell+'\"]');"
+                "if(el){el.focus();}$focus_cell='';}"
             ),
             header_bar(),
             Div(
