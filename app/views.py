@@ -226,20 +226,20 @@ def header_bar():
             Div(
                 {"class": "flex items-center gap-1.5 ml-4"},
                 Div(
-                    data.show("kernel_state === 'idle'"),
+                    data.show("$kernel_state === 'idle'"),
                     {"class": "w-2 h-2 rounded-full bg-green-400"},
                 ),
                 Div(
-                    data.show("kernel_state === 'busy'"),
+                    data.show("$kernel_state === 'busy'"),
                     {"class": "w-2 h-2 rounded-full bg-yellow-400 animate-pulse"},
                 ),
                 Div(
-                    data.show("kernel_state === 'dead'"),
+                    data.show("$kernel_state === 'dead'"),
                     {"class": "w-2 h-2 rounded-full bg-red-500"},
                 ),
                 Span(
                     {"class": "text-xs text-zinc-500"},
-                    data.text("kernel_state"),
+                    data.text("$kernel_state"),
                 ),
             ),
         ),
@@ -299,20 +299,20 @@ def sidebar_view(active_id: int, notebooks: list[Notebook]):
 def execution_indicator():
     return Div(
         Div(
-            data.show("executing"),
+            data.show("$executing"),
             {"class": "fixed bottom-4 left-60 flex items-center gap-2 text-sm text-zinc-400"},
             _SPINNER_SVG,
             "executing…",
         ),
         Div(
-            data.show("!executing && last_status === 'ok'"),
+            data.show("!$executing && $last_status === 'ok'"),
             {
                 "class": "fixed bottom-4 left-60 flex items-center gap-2 text-sm text-green-400"
             },
             "✓ done",
         ),
         Div(
-            data.show("!executing && last_status === 'error'"),
+            data.show("!$executing && $last_status === 'error'"),
             {
                 "class": "fixed bottom-4 left-60 flex items-center gap-2 text-sm text-red-400"
             },
