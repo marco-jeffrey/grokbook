@@ -347,7 +347,7 @@ def _nb_item_rename(nb: Notebook):
             {
                 "type": "text",
                 "autofocus": True,
-                "data-on-keydown": f"if(event.key==='Enter'){{{at.post(f'/nb/rename/{nb.id}', include=[sig])}}};"
+                "data-on:keydown": f"if(event.key==='Enter'){{{at.post(f'/nb/rename/{nb.id}', include=[sig])}}};"
                 f"if(event.key==='Escape'){{{at.post('/nb/menu-close')}}}",
                 "class": "w-full px-3 py-2 rounded-md text-sm bg-zinc-800 border border-indigo-500 "
                 "text-zinc-200 outline-none",
