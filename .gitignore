@@ -15,3 +15,5 @@ wheels/
 # Local dependency repos
 datastar/
 stario/
+
+.extras/
