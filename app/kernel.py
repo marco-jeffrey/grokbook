@@ -21,13 +21,16 @@ class KernelManager:
     async def execute(self, code: str) -> tuple[str, bool]:
         """Execute code in the persistent kernel. Serialised via lock."""
         async with self._lock:
-            self._kc.execute(code)
+            msg_id = self._kc.execute(code)
             outputs: list[str] = []
             is_error = False
 
             while True:
                 try:
                     msg = await self._kc.get_iopub_msg(timeout=30)
+                    # Skip messages from other requests (e.g. kernel startup)
+                    if msg["parent_header"].get("msg_id") != msg_id:
+                        continue
                     t = msg["msg_type"]
                     if t == "stream":
                         outputs.append(msg["content"]["text"])

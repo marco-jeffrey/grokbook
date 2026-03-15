@@ -126,6 +126,7 @@ def app_router(db: Database, pool: KernelPool) -> Router:
 
     router.get("/", index)
     router.get("/nb/*", nb_page)
+    router.get("/nb/new", new_notebook)
     router.post("/nb/new", new_notebook)
     router.post("/cells/new", add_cell)
     router.post("/cells/execute/*", execute_cell)
