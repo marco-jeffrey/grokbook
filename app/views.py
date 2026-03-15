@@ -2,6 +2,7 @@ import html as _e
 
 from stario.datastar import DatastarScript, at, data
 from stario.html import (
+    A,
     Body,
     Button,
     Div,
@@ -11,21 +12,42 @@ from stario.html import (
     Pre,
     SafeString,
     Script,
+    Span,
     Textarea,
     Title,
 )
 
-_COMPLETE_JS = SafeString("""
+from app.state import Cell, Notebook
+
+# ── JS ────────────────────────────────────────────────────────────────────────
+
+_APP_JS = SafeString("""
 (function () {
   var _activeCell = null;
   var _cursorStart = 0;
   var _cursorEnd = 0;
   var _selectedIdx = -1;
+  var _saveTimers = {};
 
-  // ── input handler ────────────────────────────────────────────────────────
+  function nbId() { return document.body.dataset.notebookId; }
+
+  // ── input handler ──────────────────────────────────────────────────────
   document.addEventListener('input', function (e) {
     var ta = e.target;
     if (!ta.dataset.cellId) return;
+
+    // autosave debounce
+    clearTimeout(_saveTimers[ta.dataset.cellId]);
+    _saveTimers[ta.dataset.cellId] = setTimeout(function () {
+      var body = {};
+      body['cell_' + ta.dataset.cellId] = ta.value;
+      fetch('/cells/save/' + ta.dataset.cellId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+    }, 1500);
+
     var ch = ta.value[ta.selectionStart - 1];
     if (ch === '(') {
       hideCompletions();
@@ -38,7 +60,7 @@ _COMPLETE_JS = SafeString("""
     }
   });
 
-  // ── completions ───────────────────────────────────────────────────────────
+  // ── completions ────────────────────────────────────────────────────────
   async function fetchComplete(ta) {
     var code = ta.value;
     var cursor_pos = ta.selectionStart;
@@ -47,7 +69,7 @@ _COMPLETE_JS = SafeString("""
       var res = await fetch('/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: code, cursor_pos: cursor_pos })
+        body: JSON.stringify({ code: code, cursor_pos: cursor_pos, notebook_id: parseInt(nbId()) })
       });
       var d = await res.json();
       _activeCell = ta.dataset.cellId;
@@ -97,16 +119,16 @@ _COMPLETE_JS = SafeString("""
     hideCompletions();
   }
 
-  // ── signature / inspect ───────────────────────────────────────────────────
+  // ── signature / inspect ────────────────────────────────────────────────
   async function fetchInspect(ta) {
     var code = ta.value;
-    var cursor_pos = ta.selectionStart - 1;  // position before the '('
+    var cursor_pos = ta.selectionStart - 1;
     if (!code.trim()) return;
     try {
       var res = await fetch('/inspect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: code, cursor_pos: cursor_pos })
+        body: JSON.stringify({ code: code, cursor_pos: cursor_pos, notebook_id: parseInt(nbId()) })
       });
       var d = await res.json();
       if (d.text) showSignature(ta, d.text);
@@ -118,7 +140,6 @@ _COMPLETE_JS = SafeString("""
     if (!box) return;
     var caret = getCaretCoordinates(ta, ta.selectionStart);
     box.style.left = (ta.offsetLeft + caret.left) + 'px';
-    // position above current line using CSS transform
     box.style.top  = (ta.offsetTop + caret.top) + 'px';
     box.style.transform = 'translateY(-100%) translateY(-4px)';
     box.textContent = text;
@@ -130,7 +151,7 @@ _COMPLETE_JS = SafeString("""
     if (box) box.classList.add('hidden');
   }
 
-  // ── events ────────────────────────────────────────────────────────────────
+  // ── events ─────────────────────────────────────────────────────────────
   document.addEventListener('click', function (e) {
     var item = e.target.closest('.completion-item');
     if (item) { insertMatch(item.dataset.match); return; }
@@ -143,6 +164,18 @@ _COMPLETE_JS = SafeString("""
   });
 
   document.addEventListener('keydown', function (e) {
+    // Shift+Enter: execute cell (always takes priority)
+    if (e.key === 'Enter' && e.shiftKey) {
+      var ta = e.target;
+      if (!ta.dataset.cellId) return;
+      e.preventDefault();
+      hideCompletions();
+      hideSignature(ta.dataset.cellId);
+      var btn = document.getElementById('run-btn-' + ta.dataset.cellId);
+      if (btn) btn.click();
+      return;
+    }
+
     if (e.key === 'Escape') {
       hideCompletions();
       document.querySelectorAll('[id^="signature-"]').forEach(function (d) {
@@ -150,10 +183,12 @@ _COMPLETE_JS = SafeString("""
       });
       return;
     }
+
     var drop = _activeCell ? document.getElementById('completions-' + _activeCell) : null;
     if (!drop || drop.classList.contains('hidden')) return;
     var items = drop.querySelectorAll('.completion-item');
     if (!items.length) return;
+
     if (e.key === 'Tab') {
       e.preventDefault();
       var next = e.shiftKey
@@ -168,11 +203,126 @@ _COMPLETE_JS = SafeString("""
 })();
 """)
 
-from app.state import Cell
+_SPINNER_SVG = SafeString(
+    '<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">'
+    '<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>'
+    '<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>'
+    "</svg>"
+)
+
+
+# ── components ────────────────────────────────────────────────────────────────
+
+
+def header_bar():
+    return Div(
+        {
+            "class": "fixed top-0 left-0 right-0 h-12 bg-zinc-900 border-b border-zinc-800 "
+            "flex items-center justify-between px-4 z-40"
+        },
+        Div(
+            {"class": "flex items-center gap-3"},
+            Span({"class": "text-sm font-semibold text-zinc-300"}, "nb-staroid"),
+            Div(
+                {"class": "flex items-center gap-1.5 ml-4"},
+                Div(
+                    data.show("kernel_state === 'idle'"),
+                    {"class": "w-2 h-2 rounded-full bg-green-400"},
+                ),
+                Div(
+                    data.show("kernel_state === 'busy'"),
+                    {"class": "w-2 h-2 rounded-full bg-yellow-400 animate-pulse"},
+                ),
+                Div(
+                    data.show("kernel_state === 'dead'"),
+                    {"class": "w-2 h-2 rounded-full bg-red-500"},
+                ),
+                Span(
+                    {"class": "text-xs text-zinc-500"},
+                    data.text("kernel_state"),
+                ),
+            ),
+        ),
+        Button(
+            data.on(
+                "click",
+                at.post("/kernel/restart", include=["notebook_id"]),
+            ),
+            {
+                "class": "text-xs text-zinc-500 hover:text-zinc-200 transition-colors "
+                "cursor-pointer px-3 py-1 rounded border border-zinc-700 hover:border-zinc-500"
+            },
+            "↺ Restart Kernel",
+        ),
+    )
+
+
+def sidebar_view(active_id: int, notebooks: list[Notebook]):
+    return Div(
+        {
+            "class": "fixed left-0 top-12 w-56 h-[calc(100vh-3rem)] bg-zinc-900 "
+            "border-r border-zinc-800 p-4 overflow-y-auto z-30"
+        },
+        Div(
+            {"class": "text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3"},
+            "Notebooks",
+        ),
+        *[
+            A(
+                {
+                    "href": f"/nb/{nb.id}",
+                    "class": (
+                        "block px-3 py-2 rounded-md text-sm mb-1 truncate transition-colors "
+                        + (
+                            "bg-indigo-600/20 text-indigo-300 border border-indigo-600/30"
+                            if nb.id == active_id
+                            else "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                        )
+                    ),
+                },
+                nb.name,
+            )
+            for nb in notebooks
+        ],
+        A(
+            {
+                "href": "/nb/new",
+                "class": "block px-3 py-2 rounded-md text-sm mt-3 text-zinc-500 "
+                "hover:text-indigo-400 hover:bg-zinc-800 transition-colors "
+                "border border-dashed border-zinc-700",
+            },
+            "+ New Notebook",
+        ),
+    )
+
+
+def execution_indicator():
+    return Div(
+        Div(
+            data.show("executing"),
+            {"class": "fixed bottom-4 left-60 flex items-center gap-2 text-sm text-zinc-400"},
+            _SPINNER_SVG,
+            "executing…",
+        ),
+        Div(
+            data.show("!executing && last_status === 'ok'"),
+            {
+                "class": "fixed bottom-4 left-60 flex items-center gap-2 text-sm text-green-400"
+            },
+            "✓ done",
+        ),
+        Div(
+            data.show("!executing && last_status === 'error'"),
+            {
+                "class": "fixed bottom-4 left-60 flex items-center gap-2 text-sm text-red-400"
+            },
+            "✗ error",
+        ),
+    )
 
 
 def cell_view(cell: Cell):
-    is_error = "Error" in cell.output or "Traceback" in cell.output
+    is_error = cell.status == "error"
     out_class = (
         "mt-2 rounded-lg border border-red-900 bg-red-950 p-4 font-mono "
         "text-sm text-red-300 whitespace-pre-wrap break-words"
@@ -199,27 +349,34 @@ def cell_view(cell: Cell):
                     ),
                 },
             ),
-            Div({
-                "id": f"completions-{cell.id}",
-                "class": "hidden absolute z-50 min-w-48 max-h-48 overflow-y-auto "
-                         "bg-zinc-800 border border-zinc-600 rounded-lg shadow-xl",
-            }),
-            Div({
-                "id": f"signature-{cell.id}",
-                "class": "hidden absolute z-50 max-w-xl max-h-56 overflow-y-auto "
-                         "bg-zinc-900 border border-indigo-800 rounded-lg shadow-xl "
-                         "px-3 py-2 font-mono text-xs text-zinc-300 whitespace-pre-wrap",
-            }),
-        ),
-        Div(
-            {"class": "mt-2"},
-            Button(
-                data.on("click", at.post(f"/cells/execute/{cell.id}", include=[sig])),
+            Div(
                 {
-                    "class": "px-4 py-1.5 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-500 transition-colors cursor-pointer"
-                },
-                "▶  Run",
+                    "id": f"completions-{cell.id}",
+                    "class": "hidden absolute z-50 min-w-48 max-h-48 overflow-y-auto "
+                    "bg-zinc-800 border border-zinc-600 rounded-lg shadow-xl",
+                }
             ),
+            Div(
+                {
+                    "id": f"signature-{cell.id}",
+                    "class": "hidden absolute z-50 max-w-xl max-h-56 overflow-y-auto "
+                    "bg-zinc-900 border border-indigo-800 rounded-lg shadow-xl "
+                    "px-3 py-2 font-mono text-xs text-zinc-300 whitespace-pre-wrap",
+                }
+            ),
+        ),
+        # Hidden button — Shift+Enter clicks this to trigger Datastar indicator
+        Button(
+            data.on("click", at.post(f"/cells/execute/{cell.id}", include=[sig])),
+            data.indicator("executing"),
+            {"id": f"run-btn-{cell.id}", "class": "hidden"},
+        ),
+        # Status hint
+        Div(
+            {"class": "mt-1 flex items-center gap-2 text-xs"},
+            Span({"class": "text-zinc-600"}, "shift+enter to run"),
+            Span({"class": "text-green-400"}, "✓") if cell.status == "ok" else SafeString(""),
+            Span({"class": "text-red-400"}, "✗") if cell.status == "error" else SafeString(""),
         ),
         Pre({"class": out_class}, SafeString(_e.escape(cell.output)))
         if cell.output
@@ -227,42 +384,62 @@ def cell_view(cell: Cell):
     )
 
 
-def notebook(cells: list[Cell]):
+def notebook(cells: list[Cell], nb_id: int):
     """Full notebook div — SSE-patched on every change."""
     return Div(
         {"id": "notebook", "class": "w-full max-w-3xl"},
         *[cell_view(c) for c in cells],
         Button(
-            data.on("click", at.post("/cells/new")),
+            data.on("click", at.post("/cells/new", include=["notebook_id"])),
             {
-                "class": "mt-2 px-4 py-1.5 border border-zinc-700 text-zinc-400 rounded-md text-sm hover:border-indigo-500 hover:text-indigo-400 transition-colors cursor-pointer",
+                "class": "mt-2 px-4 py-1.5 border border-zinc-700 text-zinc-400 rounded-md "
+                "text-sm hover:border-indigo-500 hover:text-indigo-400 transition-colors cursor-pointer",
             },
             "+ New Cell",
         ),
     )
 
 
-def page(cells: list[Cell]):
-    """Full HTML shell — only used for the initial GET /."""
+def page(nb: Notebook, notebooks: list[Notebook], cells: list[Cell]):
+    """Full HTML shell — only used for the initial GET /nb/{id}."""
     return Html(
         Head(
             Meta({"charset": "utf-8"}),
-            Meta(
-                {"name": "viewport", "content": "width=device-width, initial-scale=1"}
-            ),
-            Title("nb-staroid"),
+            Meta({"name": "viewport", "content": "width=device-width, initial-scale=1"}),
+            Title(f"{nb.name} — nb-staroid"),
             Script({"src": "https://cdn.tailwindcss.com"}),
             Script({"src": "https://cdn.jsdelivr.net/npm/textarea-caret@3.1.0/index.js"}),
             DatastarScript(),
         ),
         Body(
             {
-                "class": "min-h-screen bg-zinc-950 text-zinc-200 flex justify-center py-10 px-4"
+                "class": "min-h-screen bg-zinc-950 text-zinc-200",
+                "data-notebook-id": str(nb.id),
             },
-            notebook(cells),
-            SafeString(
-                '<p class="fixed bottom-4 right-4 text-xs text-zinc-700">persistent kernel</p>'
+            data.signals(
+                {
+                    "notebook_id": nb.id,
+                    "executing": False,
+                    "last_status": "",
+                    "focus_cell": "",
+                    "kernel_state": "idle",
+                }
             ),
-            Script(_COMPLETE_JS),
+            data.effect(
+                "if(focus_cell){"
+                "var el=document.querySelector('textarea[data-cell-id=\"'+focus_cell+'\"]');"
+                "if(el){el.focus();}focus_cell='';}"
+            ),
+            header_bar(),
+            Div(
+                {"class": "flex pt-12"},
+                sidebar_view(nb.id, notebooks),
+                Div(
+                    {"class": "flex-1 flex justify-center py-10 px-4 ml-56"},
+                    notebook(cells, nb.id),
+                ),
+            ),
+            execution_indicator(),
+            Script(_APP_JS),
         ),
     )

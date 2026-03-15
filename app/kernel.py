@@ -83,7 +83,52 @@ class KernelManager:
                     break
             return {"matches": [], "cursor_start": cursor_pos, "cursor_end": cursor_pos}
 
+    async def get_state(self) -> str:
+        try:
+            alive = await self._km.is_alive()
+            if not alive:
+                return "dead"
+            return "busy" if self._lock.locked() else "idle"
+        except Exception:
+            return "dead"
+
+    async def restart(self) -> None:
+        if self._kc:
+            self._kc.stop_channels()
+        await self._km.restart_kernel()
+        self._kc = self._km.client()
+        self._kc.start_channels()
+        await self._kc.wait_for_ready(timeout=30)
+
     async def shutdown(self) -> None:
         if self._kc:
             self._kc.stop_channels()
         await self._km.shutdown_kernel(now=True)
+
+
+class KernelPool:
+    """Lazily starts and caches one KernelManager per notebook_id."""
+
+    def __init__(self) -> None:
+        self._kernels: dict[int, KernelManager] = {}
+
+    async def get(self, notebook_id: int) -> KernelManager:
+        if notebook_id not in self._kernels:
+            km = KernelManager()
+            await km.start()
+            self._kernels[notebook_id] = km
+        return self._kernels[notebook_id]
+
+    async def restart(self, notebook_id: int) -> None:
+        if notebook_id in self._kernels:
+            await self._kernels[notebook_id].restart()
+
+    async def get_state(self, notebook_id: int) -> str:
+        if notebook_id not in self._kernels:
+            return "idle"
+        return await self._kernels[notebook_id].get_state()
+
+    async def shutdown_all(self) -> None:
+        for km in self._kernels.values():
+            await km.shutdown()
+        self._kernels.clear()
