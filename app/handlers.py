@@ -36,7 +36,7 @@ def app_router(db: Database, pool: KernelPool) -> Router:
 
     async def new_notebook(c: Context, w: Writer) -> None:
         nb_id = await db.create_notebook()
-        w.redirect(f"/nb/{nb_id}")
+        w.navigate(f"/nb/{nb_id}")
 
     # ── cells ─────────────────────────────────────────────────────────────
 
@@ -126,7 +126,6 @@ def app_router(db: Database, pool: KernelPool) -> Router:
 
     router.get("/", index)
     router.get("/nb/*", nb_page)
-    router.get("/nb/new", new_notebook)
     router.post("/nb/new", new_notebook)
     router.post("/cells/new", add_cell)
     router.post("/cells/execute/*", execute_cell)

@@ -284,12 +284,12 @@ def sidebar_view(active_id: int, notebooks: list[Notebook]):
             )
             for nb in notebooks
         ],
-        A(
+        Button(
+            data.on("click", at.post("/nb/new")),
             {
-                "href": "/nb/new",
-                "class": "block px-3 py-2 rounded-md text-sm mt-3 text-zinc-500 "
+                "class": "block w-full text-left px-3 py-2 rounded-md text-sm mt-3 text-zinc-500 "
                 "hover:text-indigo-400 hover:bg-zinc-800 transition-colors "
-                "border border-dashed border-zinc-700",
+                "border border-dashed border-zinc-700 cursor-pointer",
             },
             "+ New Notebook",
         ),
