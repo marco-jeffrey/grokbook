@@ -34,10 +34,25 @@ _APP_JS = SafeString("""
 
   function nbId() { return document.body.dataset.notebookId; }
 
+  // ── auto-resize textareas ──────────────────────────────────────────────
+  function autoResize(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+  }
+  function resizeAll() {
+    document.querySelectorAll('textarea[data-cell-id]').forEach(autoResize);
+  }
+  // resize on load and after SSE patches replace the DOM
+  resizeAll();
+  new MutationObserver(resizeAll).observe(
+    document.body, { childList: true, subtree: true }
+  );
+
   // ── input handler ──────────────────────────────────────────────────────
   document.addEventListener('input', function (e) {
     var ta = e.target;
     if (!ta.dataset.cellId) return;
+    autoResize(ta);
 
     // autosave debounce
     clearTimeout(_saveTimers[ta.dataset.cellId]);
@@ -445,10 +460,9 @@ def _code_cell_view(cell: Cell):
                     "spellcheck": "false",
                     "class": (
                         "w-full min-h-[4.5rem] p-3 bg-zinc-900 border border-zinc-700 rounded-lg "
-                        "text-zinc-200 font-mono text-sm leading-relaxed resize-y outline-none "
-                        "focus:border-indigo-500 transition-colors"
+                        "text-zinc-200 font-mono text-sm leading-relaxed resize-none outline-none "
+                        "focus:border-indigo-500 transition-colors overflow-hidden"
                     ),
-                    "style": "field-sizing: content",
                 },
             ),
             Div(
@@ -518,10 +532,9 @@ def _markdown_cell_view(cell: Cell):
                     "spellcheck": "false",
                     "class": (
                         "w-full min-h-[4.5rem] p-3 bg-zinc-900 border border-zinc-700 rounded-lg "
-                        "text-zinc-200 font-mono text-sm leading-relaxed resize-y outline-none "
-                        "focus:border-indigo-500 transition-colors"
+                        "text-zinc-200 font-mono text-sm leading-relaxed resize-none outline-none "
+                        "focus:border-indigo-500 transition-colors overflow-hidden"
                     ),
-                    "style": "field-sizing: content",
                 },
             ),
             Div(
