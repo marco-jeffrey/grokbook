@@ -444,10 +444,11 @@ def _code_cell_view(cell: Cell):
                     "data-cell-id": str(cell.id),
                     "spellcheck": "false",
                     "class": (
-                        "w-full min-h-32 p-3 bg-zinc-900 border border-zinc-700 rounded-lg "
+                        "w-full min-h-[4.5rem] p-3 bg-zinc-900 border border-zinc-700 rounded-lg "
                         "text-zinc-200 font-mono text-sm leading-relaxed resize-y outline-none "
                         "focus:border-indigo-500 transition-colors"
                     ),
+                    "style": "field-sizing: content",
                 },
             ),
             Div(
@@ -516,10 +517,11 @@ def _markdown_cell_view(cell: Cell):
                     "data-cell-id": str(cell.id),
                     "spellcheck": "false",
                     "class": (
-                        "w-full min-h-32 p-3 bg-zinc-900 border border-zinc-700 rounded-lg "
+                        "w-full min-h-[4.5rem] p-3 bg-zinc-900 border border-zinc-700 rounded-lg "
                         "text-zinc-200 font-mono text-sm leading-relaxed resize-y outline-none "
                         "focus:border-indigo-500 transition-colors"
                     ),
+                    "style": "field-sizing: content",
                 },
             ),
             Div(
