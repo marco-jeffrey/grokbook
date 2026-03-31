@@ -226,6 +226,10 @@ class KernelManager:
         except Exception:
             return "dead"
 
+    async def interrupt(self) -> None:
+        """Send interrupt signal to the kernel (like Ctrl+C)."""
+        await self._km.interrupt_kernel()
+
     async def restart(self) -> None:
         if self._kc:
             self._kc.stop_channels()

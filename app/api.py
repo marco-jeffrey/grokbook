@@ -258,6 +258,16 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         w.json({"state": "idle"})
         relay.publish(f"notebook.{nb_id}.kernel_restarted", "kernel")
 
+    async def kernel_interrupt(c: Context, w: Writer) -> None:
+        try:
+            nb_id = int(c.req.tail)
+        except ValueError:
+            w.json({"error": "invalid notebook id"}, 400)
+            return
+        km = await pool.get(nb_id)
+        await km.interrupt()
+        w.json({"ok": True})
+
     # ── routes ────────────────────────────────────────────────────────────
 
     router.get("/notebooks", list_notebooks)
@@ -276,6 +286,7 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router.delete("/cells/*", delete_cell)
 
     router.get("/kernel/status/*", kernel_status)
+    router.post("/kernel/interrupt/*", kernel_interrupt)
     router.post("/kernel/restart/*", kernel_restart)
 
     return router

@@ -105,6 +105,15 @@ def header_bar():
                 "Theme",
             ),
             Button(
+                data.on("click", at.post("/kernel/interrupt", include=["notebook_id"])),
+                data.show("$executing"),
+                {
+                    "class": "text-xs text-red-400 hover:text-red-300 transition-colors "
+                    "cursor-pointer px-3 py-1 rounded border border-red-700 hover:border-red-500"
+                },
+                "■ Stop",
+            ),
+            Button(
                 data.on(
                     "click",
                     at.post("/kernel/restart", include=["notebook_id"]),
