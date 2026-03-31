@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 from queue import Empty
 
@@ -6,10 +7,17 @@ from jupyter_client import AsyncKernelManager as _KM
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[mK]")
 
+# MIME types in priority order for rich output
+_RICH_MIMES = ("image/png", "image/jpeg", "image/svg+xml", "text/html", "text/plain")
+
 
 class KernelManager:
-    def __init__(self) -> None:
+    def __init__(self, python_path: str | None = None) -> None:
         self._km = _KM(kernel_name="python3")
+        if python_path:
+            self._km.kernel_cmd = [
+                python_path, "-m", "ipykernel_launcher", "-f", "{connection_file}"
+            ]
         self._kc = None
         self._lock = asyncio.Lock()
 
@@ -19,44 +27,62 @@ class KernelManager:
         self._kc.start_channels()
         await self._kc.wait_for_ready(timeout=30)
 
+    @staticmethod
+    def _extract_rich(data: dict) -> dict | None:
+        """Pick the best MIME type from a display_data/execute_result bundle."""
+        for mime in _RICH_MIMES:
+            if mime in data:
+                return {"mime": mime, "data": data[mime]}
+        return None
+
     async def execute(self, code: str) -> tuple[str, bool]:
         """Execute code in the persistent kernel. Serialised via lock.
-        No arbitrary timeout — waits as long as the kernel is alive."""
+        No arbitrary timeout — waits as long as the kernel is alive.
+        Returns (output_string, is_error). When rich outputs are present,
+        output_string is a JSON-encoded list of {mime, data} blocks."""
         async with self._lock:
             msg_id = self._kc.execute(code)
-            outputs: list[str] = []
+            blocks: list[dict] = []
             is_error = False
+            has_rich = False
 
             while True:
                 try:
                     msg = await self._kc.get_iopub_msg(timeout=1)
                 except (TimeoutError, Empty):
-                    # No message yet — check if kernel is still alive
                     if not await self._km.is_alive():
-                        outputs.append("(kernel died during execution)")
+                        blocks.append({"mime": "text/plain", "data": "(kernel died during execution)"})
                         is_error = True
                         break
                     continue
 
-                # Skip messages from other requests (e.g. kernel startup)
                 if msg["parent_header"].get("msg_id") != msg_id:
                     continue
                 t = msg["msg_type"]
                 if t == "stream":
-                    outputs.append(msg["content"]["text"])
-                elif t == "execute_result":
-                    outputs.append(msg["content"]["data"].get("text/plain", ""))
-                elif t == "display_data":
-                    if "text/plain" in msg["content"]["data"]:
-                        outputs.append(msg["content"]["data"]["text/plain"])
+                    blocks.append({"mime": "text/plain", "data": msg["content"]["text"]})
+                elif t in ("execute_result", "display_data"):
+                    block = self._extract_rich(msg["content"]["data"])
+                    if block:
+                        if block["mime"] != "text/plain":
+                            has_rich = True
+                        blocks.append(block)
                 elif t == "error":
                     is_error = True
                     tb = msg["content"]["traceback"]
-                    outputs.append("\n".join(_ANSI.sub("", line) for line in tb))
+                    blocks.append({"mime": "text/plain", "data": "\n".join(_ANSI.sub("", line) for line in tb)})
                 elif t == "status" and msg["content"]["execution_state"] == "idle":
                     break
 
-            return "".join(outputs) or "(no output)", is_error
+            if not blocks:
+                return "(no output)", is_error
+
+            # If all outputs are text/plain, return as plain string (backward compat)
+            if not has_rich:
+                return "".join(b["data"] for b in blocks), is_error
+
+            # Rich output — JSON-encode the block list
+            return json.dumps(blocks), is_error
 
     async def inspect(self, code: str, cursor_pos: int) -> str:
         """Return plain-text docstring/signature for object at cursor."""
@@ -116,17 +142,40 @@ class KernelManager:
 
 
 class KernelPool:
-    """Lazily starts and caches one KernelManager per notebook_id."""
+    """Lazily starts and caches one KernelManager per notebook_id.
 
-    def __init__(self) -> None:
+    Evicts the least-recently-used kernel when max_kernels is reached.
+    """
+
+    def __init__(self, max_kernels: int = 5, python_path: str | None = None) -> None:
         self._kernels: dict[int, KernelManager] = {}
+        self._max_kernels = max_kernels
+        self._python_path = python_path
+
+    async def _evict_lru(self) -> None:
+        """Shut down the least-recently-used idle kernel to make room."""
+        for nb_id in list(self._kernels):
+            km = self._kernels[nb_id]
+            if not km._lock.locked():
+                await km.shutdown()
+                del self._kernels[nb_id]
+                return
+        # All kernels busy — evict the oldest anyway
+        nb_id = next(iter(self._kernels))
+        await self._kernels[nb_id].shutdown()
+        del self._kernels[nb_id]
 
     async def get(self, notebook_id: int) -> KernelManager:
-        if notebook_id not in self._kernels:
-            km = KernelManager()
-            await km.start()
-            self._kernels[notebook_id] = km
-        return self._kernels[notebook_id]
+        if notebook_id in self._kernels:
+            # Move to end (most recently used)
+            self._kernels[notebook_id] = self._kernels.pop(notebook_id)
+            return self._kernels[notebook_id]
+        if len(self._kernels) >= self._max_kernels:
+            await self._evict_lru()
+        km = KernelManager(python_path=self._python_path)
+        await km.start()
+        self._kernels[notebook_id] = km
+        return km
 
     async def restart(self, notebook_id: int) -> None:
         if notebook_id in self._kernels:

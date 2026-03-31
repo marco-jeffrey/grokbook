@@ -1,4 +1,5 @@
 import html as _e
+import json
 
 from markdown_it import MarkdownIt
 from stario.datastar import DatastarScript, at, data
@@ -8,6 +9,7 @@ from stario.html import (
     Div,
     Head,
     Html,
+    Img,
     Input,
     Meta,
     Pre,
@@ -18,208 +20,11 @@ from stario.html import (
     Title,
 )
 
+from stario import UrlFor
+
 from app.state import Cell, Notebook
 
 _md = MarkdownIt("gfm-like")
-
-# ── JS ────────────────────────────────────────────────────────────────────────
-
-_APP_JS = SafeString("""
-(function () {
-  var _activeCell = null;
-  var _cursorStart = 0;
-  var _cursorEnd = 0;
-  var _selectedIdx = -1;
-  var _saveTimers = {};
-
-  function nbId() { return document.body.dataset.notebookId; }
-
-  // ── auto-resize textareas ──────────────────────────────────────────────
-  function autoResize(ta) {
-    ta.style.height = 'auto';
-    ta.style.height = ta.scrollHeight + 'px';
-  }
-  function resizeAll() {
-    document.querySelectorAll('textarea[data-cell-id]').forEach(autoResize);
-  }
-  // resize on load and after SSE patches replace the DOM
-  resizeAll();
-  new MutationObserver(resizeAll).observe(
-    document.body, { childList: true, subtree: true }
-  );
-
-  // ── input handler ──────────────────────────────────────────────────────
-  document.addEventListener('input', function (e) {
-    var ta = e.target;
-    if (!ta.dataset.cellId) return;
-    autoResize(ta);
-
-    // autosave debounce
-    clearTimeout(_saveTimers[ta.dataset.cellId]);
-    _saveTimers[ta.dataset.cellId] = setTimeout(function () {
-      var body = {};
-      body['cell_' + ta.dataset.cellId] = ta.value;
-      fetch('/cells/save/' + ta.dataset.cellId, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-    }, 1500);
-
-    var ch = ta.value[ta.selectionStart - 1];
-    if (ch === '(') {
-      hideCompletions();
-      fetchInspect(ta);
-    } else if (ch === ')') {
-      hideSignature(ta.dataset.cellId);
-      fetchComplete(ta);
-    } else {
-      fetchComplete(ta);
-    }
-  });
-
-  // ── completions ────────────────────────────────────────────────────────
-  async function fetchComplete(ta) {
-    var code = ta.value;
-    var cursor_pos = ta.selectionStart;
-    if (!code.trim()) { hideCompletions(); return; }
-    try {
-      var res = await fetch('/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: code, cursor_pos: cursor_pos, notebook_id: parseInt(nbId()) })
-      });
-      var d = await res.json();
-      _activeCell = ta.dataset.cellId;
-      _cursorStart = d.cursor_start;
-      _cursorEnd = d.cursor_end;
-      _selectedIdx = -1;
-      showCompletions(ta, d.matches);
-    } catch (_) {}
-  }
-
-  function showCompletions(ta, matches) {
-    var drop = document.getElementById('completions-' + ta.dataset.cellId);
-    if (!drop) return;
-    if (!matches || !matches.length) { drop.classList.add('hidden'); return; }
-    var caret = getCaretCoordinates(ta, ta.selectionStart);
-    drop.style.left = (ta.offsetLeft + caret.left) + 'px';
-    drop.style.top  = (ta.offsetTop  + caret.top + caret.height) + 'px';
-    drop.innerHTML = matches.slice(0, 30).map(function (m, i) {
-      return '<div class="completion-item px-3 py-1 cursor-pointer font-mono text-sm text-zinc-200" data-match="' + m + '" data-idx="' + i + '">' + m + '</div>';
-    }).join('');
-    drop.classList.remove('hidden');
-  }
-
-  function setSelected(drop, idx) {
-    _selectedIdx = idx;
-    drop.querySelectorAll('.completion-item').forEach(function (el, i) {
-      el.classList.toggle('bg-indigo-600', i === idx);
-    });
-    var active = drop.querySelector('[data-idx="' + idx + '"]');
-    if (active) active.scrollIntoView({ block: 'nearest' });
-  }
-
-  function hideCompletions() {
-    _selectedIdx = -1;
-    document.querySelectorAll('[id^="completions-"]').forEach(function (d) {
-      d.classList.add('hidden');
-    });
-  }
-
-  function insertMatch(match) {
-    var ta = document.querySelector('textarea[data-cell-id="' + _activeCell + '"]');
-    if (ta) {
-      ta.value = ta.value.slice(0, _cursorStart) + match + ta.value.slice(_cursorEnd);
-      ta.selectionStart = ta.selectionEnd = _cursorStart + match.length;
-      ta.dispatchEvent(new Event('input'));
-    }
-    hideCompletions();
-  }
-
-  // ── signature / inspect ────────────────────────────────────────────────
-  async function fetchInspect(ta) {
-    var code = ta.value;
-    var cursor_pos = ta.selectionStart - 1;
-    if (!code.trim()) return;
-    try {
-      var res = await fetch('/inspect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: code, cursor_pos: cursor_pos, notebook_id: parseInt(nbId()) })
-      });
-      var d = await res.json();
-      if (d.text) showSignature(ta, d.text);
-    } catch (_) {}
-  }
-
-  function showSignature(ta, text) {
-    var box = document.getElementById('signature-' + ta.dataset.cellId);
-    if (!box) return;
-    var caret = getCaretCoordinates(ta, ta.selectionStart);
-    box.style.left = (ta.offsetLeft + caret.left) + 'px';
-    box.style.top  = (ta.offsetTop + caret.top) + 'px';
-    box.style.transform = 'translateY(-100%) translateY(-4px)';
-    box.textContent = text;
-    box.classList.remove('hidden');
-  }
-
-  function hideSignature(cellId) {
-    var box = document.getElementById('signature-' + cellId);
-    if (box) box.classList.add('hidden');
-  }
-
-  // ── events ─────────────────────────────────────────────────────────────
-  document.addEventListener('click', function (e) {
-    var item = e.target.closest('.completion-item');
-    if (item) { insertMatch(item.dataset.match); return; }
-    if (!e.target.closest('[id^="completions-"]')) hideCompletions();
-    if (!e.target.closest('[id^="signature-"]') && !e.target.closest('textarea')) {
-      document.querySelectorAll('[id^="signature-"]').forEach(function (d) {
-        d.classList.add('hidden');
-      });
-    }
-  });
-
-  document.addEventListener('keydown', function (e) {
-    // Shift+Enter: execute cell (always takes priority)
-    if (e.key === 'Enter' && e.shiftKey) {
-      var ta = e.target;
-      if (!ta.dataset.cellId) return;
-      e.preventDefault();
-      hideCompletions();
-      hideSignature(ta.dataset.cellId);
-      var btn = document.getElementById('run-btn-' + ta.dataset.cellId);
-      if (btn) btn.click();
-      return;
-    }
-
-    if (e.key === 'Escape') {
-      hideCompletions();
-      document.querySelectorAll('[id^="signature-"]').forEach(function (d) {
-        d.classList.add('hidden');
-      });
-      return;
-    }
-
-    var drop = _activeCell ? document.getElementById('completions-' + _activeCell) : null;
-    if (!drop || drop.classList.contains('hidden')) return;
-    var items = drop.querySelectorAll('.completion-item');
-    if (!items.length) return;
-
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      var next = e.shiftKey
-        ? (_selectedIdx <= 0 ? items.length - 1 : _selectedIdx - 1)
-        : (_selectedIdx + 1) % items.length;
-      setSelected(drop, next);
-    } else if (e.key === 'Enter' && _selectedIdx >= 0) {
-      e.preventDefault();
-      insertMatch(items[_selectedIdx].dataset.match);
-    }
-  });
-})();
-""")
 
 _SPINNER_SVG = SafeString(
     '<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">'
@@ -362,11 +167,14 @@ def _nb_item_rename(nb: Notebook):
         data.signals({sig: nb.name}),
         Input(
             data.bind(sig),
+            data.on(
+                "keydown",
+                f"if(evt.key==='Enter'){{{at.post(f'/nb/rename/{nb.id}', include=[sig])}}};"
+                f"if(evt.key==='Escape'){{{at.post('/nb/menu-close')}}}",
+            ),
             {
                 "type": "text",
                 "autofocus": True,
-                "data-on:keydown": f"if(event.key==='Enter'){{{at.post(f'/nb/rename/{nb.id}', include=[sig])}}};"
-                f"if(event.key==='Escape'){{{at.post('/nb/menu-close')}}}",
                 "class": "w-full px-3 py-2 rounded-md text-sm bg-zinc-800 border border-indigo-500 "
                 "text-zinc-200 outline-none",
             },
@@ -437,15 +245,55 @@ def execution_indicator():
     )
 
 
+def _render_output_block(block: dict):
+    """Render a single {mime, data} output block."""
+    mime = block.get("mime", "text/plain")
+    content = block.get("data", "")
+    if mime in ("image/png", "image/jpeg"):
+        return Img({"src": f"data:{mime};base64,{content}", "class": "max-w-full rounded my-2"})
+    if mime == "image/svg+xml":
+        return Div(
+            {"class": "bg-white rounded p-2 my-2 inline-block"},
+            SafeString(content),
+        )
+    if mime == "text/html":
+        return Div({"class": "prose prose-invert prose-sm max-w-none my-2"}, SafeString(content))
+    # text/plain fallback
+    return Pre(
+        {"class": "font-mono text-sm whitespace-pre-wrap break-words"},
+        SafeString(_e.escape(content)),
+    )
+
+
+def _render_output(output: str, is_error: bool):
+    """Render cell output — handles both plain text and rich JSON blocks."""
+    if not output:
+        return SafeString("")
+
+    base_class = (
+        "mt-2 rounded-lg border p-4 "
+        + ("border-red-900 bg-red-950 text-red-300" if is_error
+           else "border-zinc-700 bg-zinc-900 text-emerald-300")
+    )
+
+    # Try parsing as rich output (JSON list of {mime, data} blocks)
+    if not is_error:
+        try:
+            blocks = json.loads(output)
+            if isinstance(blocks, list) and blocks and "mime" in blocks[0]:
+                return Div(
+                    {"class": base_class},
+                    *[_render_output_block(b) for b in blocks],
+                )
+        except (json.JSONDecodeError, TypeError, KeyError):
+            pass
+
+    # Plain text fallback
+    return Pre({"class": base_class + " font-mono text-sm whitespace-pre-wrap break-words"}, SafeString(_e.escape(output)))
+
+
 def _code_cell_view(cell: Cell):
     is_error = cell.status == "error"
-    out_class = (
-        "mt-2 rounded-lg border border-red-900 bg-red-950 p-4 font-mono "
-        "text-sm text-red-300 whitespace-pre-wrap break-words"
-        if is_error
-        else "mt-2 rounded-lg border border-zinc-700 bg-zinc-900 p-4 font-mono "
-        "text-sm text-emerald-300 whitespace-pre-wrap break-words"
-    )
     sig = f"cell_{cell.id}"
     return Div(
         {"class": "mb-6"},
@@ -494,9 +342,7 @@ def _code_cell_view(cell: Cell):
             Span({"class": "text-green-400"}, "✓") if cell.status == "ok" else SafeString(""),
             Span({"class": "text-red-400"}, "✗") if cell.status == "error" else SafeString(""),
         ),
-        Pre({"class": out_class}, SafeString(_e.escape(cell.output)))
-        if cell.output
-        else SafeString(""),
+        _render_output(cell.output, is_error),
     )
 
 
@@ -512,10 +358,13 @@ def _markdown_cell_view(cell: Cell):
                 "id": f"md-display-{cell.id}",
                 "class": "prose prose-invert prose-sm max-w-none p-4 rounded-lg "
                 "border border-zinc-800 hover:border-zinc-600 transition-colors cursor-text",
-                "data-on:dblclick": f"document.getElementById('md-edit-{cell.id}').classList.remove('hidden');"
+            },
+            data.on(
+                "dblclick",
+                f"document.getElementById('md-edit-{cell.id}').classList.remove('hidden');"
                 f"document.getElementById('md-display-{cell.id}').classList.add('hidden');"
                 f"document.querySelector('#md-edit-{cell.id} textarea').focus()",
-            },
+            ),
             SafeString(rendered),
         ),
         # Edit mode (hidden by default)
@@ -581,7 +430,12 @@ def notebook(cells: list[Cell], nb_id: int):
     )
 
 
-def page(nb: Notebook, notebooks: list[Notebook], cells: list[Cell]):
+def page(
+    nb: Notebook,
+    notebooks: list[Notebook],
+    cells: list[Cell],
+    url_for: UrlFor,
+):
     """Full HTML shell — only used for the initial GET /nb/{id}."""
     return Html(
         Head(
@@ -606,6 +460,7 @@ def page(nb: Notebook, notebooks: list[Notebook], cells: list[Cell]):
                     "kernel_state": "idle",
                 }
             ),
+            data.init(at.get("/events")),
             data.effect("document.body.dataset.notebookId=String($notebook_id)"),
             data.effect(
                 "if($focus_cell){"
@@ -622,6 +477,6 @@ def page(nb: Notebook, notebooks: list[Notebook], cells: list[Cell]):
                 ),
             ),
             execution_indicator(),
-            Script(_APP_JS),
+            Script({"src": url_for("static", "js/app.js")}),
         ),
     )
