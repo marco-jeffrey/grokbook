@@ -79,6 +79,17 @@ def header_bar():
             Button(
                 data.on(
                     "click",
+                    "$theme = $theme === 'light' ? 'dark' : 'light'",
+                ),
+                {
+                    "class": "text-xs text-zinc-500 hover:text-zinc-200 transition-colors "
+                    "cursor-pointer px-3 py-1 rounded border border-zinc-700 hover:border-zinc-500"
+                },
+                "Theme",
+            ),
+            Button(
+                data.on(
+                    "click",
                     at.post("/kernel/restart", include=["notebook_id"]),
                 ),
                 {
@@ -570,6 +581,17 @@ def page(
             Script({"src": "https://cdn.tailwindcss.com?plugins=typography"}),
             Script({"src": "https://cdn.jsdelivr.net/npm/textarea-caret@3.1.0/index.js"}),
             DatastarScript(),
+            SafeString(
+                "<style>"
+                ".light-mode { filter: invert(1) hue-rotate(180deg); }"
+                ".light-mode img, .light-mode svg, .light-mode video, "
+                ".light-mode [data-no-invert] { filter: invert(1) hue-rotate(180deg); }"
+                "</style>"
+            ),
+            Script(SafeString(
+                "(function(){var t=localStorage.getItem('nb-theme');"
+                "if(t==='light')document.documentElement.classList.add('light-mode');})()"
+            )),
         ),
         Body(
             {
@@ -584,10 +606,17 @@ def page(
                     "focus_cell": "",
                     "kernel_state": "idle",
                     "show_vars": False,
+                    "theme": "dark",
                 }
             ),
             data.init(at.get("/events", retry_interval_ms=2000, retry_max_count=0)),
             data.effect("document.body.dataset.notebookId=String($notebook_id)"),
+            data.effect(
+                "var t=localStorage.getItem('nb-theme');"
+                "if(t&&t!==$theme){$theme=t;}"
+                "document.documentElement.classList.toggle('light-mode',$theme==='light');"
+                "localStorage.setItem('nb-theme',$theme)"
+            ),
             data.effect(
                 "if($focus_cell){"
                 "var el=document.querySelector('textarea[data-cell-id=\"'+$focus_cell+'\"]');"

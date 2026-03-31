@@ -55,6 +55,6 @@
 - [x] Commit
 
 ## Feature 10: Dark/Light Theme Toggle
-- [ ] views.py — theme signal, dark: classes, toggle button
-- [ ] app.js — theme restoration
-- [ ] Commit
+- [x] views.py — theme signal, CSS invert, toggle button, localStorage persist
+- [x] app.js — no changes needed (CSS handles it)
+- [x] Commit
