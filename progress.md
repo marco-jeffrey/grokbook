@@ -45,9 +45,9 @@
 - [x] Commit
 
 ## Feature 8: Auto-reconnect SSE
-- [ ] views.py — retry config
-- [ ] handlers.py — heartbeat
-- [ ] Commit
+- [x] views.py — retry config (unlimited retries, 2s interval)
+- [x] handlers.py — heartbeat every 15s
+- [x] Commit
 
 ## Feature 9: OpenAI-Compatible Endpoint
 - [ ] app/openai.py — tool definitions, dispatch, /chat/completions

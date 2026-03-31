@@ -586,7 +586,7 @@ def page(
                     "show_vars": False,
                 }
             ),
-            data.init(at.get("/events")),
+            data.init(at.get("/events", retry_interval_ms=2000, retry_max_count=0)),
             data.effect("document.body.dataset.notebookId=String($notebook_id)"),
             data.effect(
                 "if($focus_cell){"

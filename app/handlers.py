@@ -51,17 +51,33 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         w.patch(element=notebook(cells, nb_id), selector="#notebook")
         w.patch(element=sidebar_view(nb_id, notebooks), selector="#sidebar")
 
-        # Loop: wait for relay events, re-patch
-        async for subject, payload in w.alive(relay.subscribe("notebook.*")):
-            parts = subject.split(".")
-            event_nb_id = int(parts[1]) if len(parts) >= 2 else 0
+        # Loop: wait for relay events, re-patch. Heartbeat every 15s
+        # to prevent proxies/browsers from closing idle connections.
+        sub = relay.subscribe("notebook.*")
+        sub_iter = sub.__aiter__()
+        alive = w.alive()
+        async with alive:
+            while True:
+                try:
+                    subject, payload = await asyncio.wait_for(
+                        sub_iter.__anext__(), timeout=15
+                    )
+                except TimeoutError:
+                    # Send SSE comment as heartbeat
+                    w.write(b": heartbeat\n\n")
+                    continue
+                except (StopAsyncIteration, asyncio.CancelledError):
+                    break
 
-            notebooks = await db.get_all_notebooks()
-            w.patch(element=sidebar_view(nb_id, notebooks), selector="#sidebar")
+                parts = subject.split(".")
+                event_nb_id = int(parts[1]) if len(parts) >= 2 else 0
 
-            if event_nb_id == nb_id:
-                cells = await db.get_all_cells(nb_id)
-                w.patch(element=notebook(cells, nb_id), selector="#notebook")
+                notebooks = await db.get_all_notebooks()
+                w.patch(element=sidebar_view(nb_id, notebooks), selector="#sidebar")
+
+                if event_nb_id == nb_id:
+                    cells = await db.get_all_cells(nb_id)
+                    w.patch(element=notebook(cells, nb_id), selector="#notebook")
 
     # ── notebook switching ────────────────────────────────────────────────
 
