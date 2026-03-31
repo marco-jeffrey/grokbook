@@ -4,6 +4,7 @@ import json
 from markdown_it import MarkdownIt
 from stario.datastar import DatastarScript, at, data
 from stario.html import (
+    A,
     Body,
     Button,
     Div,
@@ -11,6 +12,7 @@ from stario.html import (
     Html,
     Img,
     Input,
+    Label,
     Meta,
     Pre,
     SafeString,
@@ -68,6 +70,24 @@ def header_bar():
         ),
         Div(
             {"class": "flex items-center gap-2"},
+            Div(
+                data.on("click", "$wide_mode = !$wide_mode"),
+                {"class": "flex items-center gap-1.5 cursor-pointer select-none group/toggle"},
+                Span({"class": "text-xs text-zinc-500 group-hover/toggle:text-zinc-300 transition-colors"}, "Wide"),
+                Div(
+                    {
+                        "class": "w-7 h-4 rounded-full relative transition-colors",
+                    },
+                    data.class_("bg-indigo-500", "$wide_mode"),
+                    data.class_("bg-zinc-700", "!$wide_mode"),
+                    Div({
+                        "class": "absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all",
+                    },
+                        data.class_("left-3.5", "$wide_mode"),
+                        data.class_("left-0.5", "!$wide_mode"),
+                    ),
+                ),
+            ),
             Button(
                 data.on("click", "$show_vars = !$show_vars"),
                 {
@@ -161,6 +181,10 @@ def _nb_item_menu(nb: Notebook, active_id: int):
             },
             Button(data.on("click", at.post(f"/nb/rename-mode/{nb.id}")), {"class": btn}, "Rename"),
             Button(data.on("click", at.post(f"/nb/duplicate/{nb.id}")), {"class": btn}, "Duplicate"),
+            A(
+                {"href": f"/nb/export/{nb.id}", "download": f"{nb.name}.ipynb", "class": btn},
+                "Export .ipynb",
+            ),
             Button(
                 data.on("click", at.post(f"/nb/delete/{nb.id}")),
                 {
@@ -236,6 +260,37 @@ def sidebar_view(
             },
             "+ New Notebook",
         ),
+        # Import .ipynb — file input hidden, label acts as button
+        Label(
+            {
+                "for": "ipynb-upload",
+                "class": "block w-full text-left px-3 py-2 rounded-md text-sm mt-1 text-zinc-500 "
+                "hover:text-indigo-400 hover:bg-zinc-800 transition-colors "
+                "border border-dashed border-zinc-700 cursor-pointer",
+            },
+            "↑ Import .ipynb",
+        ),
+        Input({
+            "id": "ipynb-upload",
+            "type": "file",
+            "accept": ".ipynb",
+            "class": "hidden",
+            "data-on:change": (
+                "const f=evt.target.files[0];"
+                "if(!f)return;"
+                "const r=new FileReader();"
+                "r.onload=()=>{"
+                "fetch('/nb/import',{method:'POST',"
+                "headers:{'Content-Type':'application/json'},"
+                "body:JSON.stringify({name:f.name,content:r.result})"
+                "}).then(r=>r.json()).then(d=>{"
+                "if(d.id)window.location.href='/nb/'+d.id;"
+                "});"
+                "evt.target.value='';"
+                "};"
+                "r.readAsText(f)"
+            ),
+        }),
     )
 
 
@@ -441,7 +496,7 @@ def _code_cell_view(cell: Cell):
         # Status hint
         Div(
             {"class": "mt-1 flex items-center gap-2 text-xs ml-18"},
-            Span({"class": "text-zinc-600"}, "shift+enter to run"),
+            SafeString(""),
             Span({"class": "text-green-400"}, "✓") if cell.status == "ok" else SafeString(""),
             Span({"class": "text-red-400"}, "✗") if cell.status == "error" else SafeString(""),
         ),
@@ -495,10 +550,7 @@ def _markdown_cell_view(cell: Cell):
                     ),
                 },
             ),
-            Div(
-                {"class": "mt-1 text-xs text-zinc-600"},
-                "shift+enter to save · double-click rendered text to edit",
-            ),
+            SafeString(""),
         ),
         # Hidden button — Shift+Enter saves markdown and re-renders
         Button(
@@ -521,7 +573,8 @@ def notebook(cells: list[Cell], nb_id: int):
         "text-sm hover:border-indigo-500 hover:text-indigo-400 transition-colors cursor-pointer"
     )
     return Div(
-        {"id": "notebook", "class": "w-full max-w-3xl"},
+        {"id": "notebook", "class": "w-full transition-all duration-200"},
+        data.class_("max-w-3xl", "!$wide_mode"),
         *[cell_view(c) for c in cells],
         Div(
             {"class": "mt-2 flex gap-2"},
@@ -588,10 +641,13 @@ def page(
             ),
             Script(SafeString(
                 "(function(){var t=localStorage.getItem('nb-theme');"
-                "if(t==='light'){document.documentElement.classList.add('light-mode');"
+                "var w=localStorage.getItem('nb-wide')==='true';"
+                "if(t==='light'){document.documentElement.classList.add('light-mode');}"
                 "document.addEventListener('DOMContentLoaded',function(){"
                 "var b=document.body;if(b){var s=JSON.parse(b.getAttribute('data-signals')||'{}');"
-                "s.light_mode=true;b.setAttribute('data-signals',JSON.stringify(s));}});}})()"
+                "if(t==='light')s.light_mode=true;"
+                "if(w)s.wide_mode=true;"
+                "b.setAttribute('data-signals',JSON.stringify(s));}});})()"
             )),
         ),
         Body(
@@ -607,6 +663,7 @@ def page(
                     "focus_cell": "",
                     "kernel_state": "idle",
                     "show_vars": False,
+                    "wide_mode": False,
                     "light_mode": False,
                 }
             ),
@@ -620,6 +677,10 @@ def page(
                     "document.documentElement.classList.toggle('light-mode',$light_mode);"
                     "localStorage.setItem('nb-theme',$light_mode?'light':'dark')"
                 ),
+                {"style": "display:none"},
+            ),
+            Span(
+                data.effect("localStorage.setItem('nb-wide',String($wide_mode))"),
                 {"style": "display:none"},
             ),
             Span(

@@ -6,6 +6,7 @@ from stario.http import Router
 from stario.http.types import Context, Writer
 
 from app.db import Database
+from app.ipynb import export_ipynb, import_ipynb
 from app.kernel import KernelPool
 from app.views import _render_output, notebook, page, sidebar_view
 
@@ -416,6 +417,39 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         text = await km.inspect(body.get("code", ""), body.get("cursor_pos", 0))
         w.json({"text": text})
 
+    # ── import / export ──────────────────────────────────────────────────
+
+    async def nb_export(c: Context, w: Writer) -> None:
+        """Download notebook as .ipynb file."""
+        try:
+            nb_id = int(c.req.tail)
+        except ValueError:
+            w.text("Not Found", 404)
+            return
+        nb = await db.get_notebook(nb_id)
+        if not nb:
+            w.text("Not Found", 404)
+            return
+        cells = await db.get_all_cells(nb_id)
+        ipynb_json = export_ipynb(nb, cells)
+        safe_name = nb.name.replace('"', "'")
+        w.headers.set(b"content-type", b"application/json")
+        w.headers.set(b"content-disposition", f'attachment; filename="{safe_name}.ipynb"'.encode())
+        w.text(ipynb_json)
+
+    async def nb_import(c: Context, w: Writer) -> None:
+        """Import .ipynb from JSON body {name, content}."""
+        body = await c.req.json()
+        content = body.get("content", "")
+        name = body.get("name", "").replace(".ipynb", "") or None
+        try:
+            nb_id = await import_ipynb(db, content.encode("utf-8"), name=name)
+        except (ValueError, Exception) as exc:
+            w.json({"error": str(exc)}, 400)
+            return
+        w.json({"id": nb_id})
+        relay.publish(f"notebook.{nb_id}.created", "notebook")
+
     # ── routes ────────────────────────────────────────────────────────────
 
     router.get("/", index)
@@ -429,6 +463,8 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router.post("/nb/rename/*", nb_rename)
     router.post("/nb/duplicate/*", nb_duplicate)
     router.post("/nb/delete/*", nb_delete)
+    router.get("/nb/export/*", nb_export)
+    router.post("/nb/import", nb_import)
     router.post("/cells/new", add_cell)
     router.post("/cells/new-md", add_md_cell)
     router.post("/cells/save-md/*", save_md_cell)
