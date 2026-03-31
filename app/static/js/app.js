@@ -425,4 +425,39 @@
       }
     }
   });
+
+  // ── variables panel polling ────────────────────────────────────────────
+  setInterval(async function () {
+    var panel = document.getElementById('vars-panel');
+    if (!panel || panel.style.display === 'none' || panel.offsetParent === null) return;
+    var id = nbId();
+    if (!id) return;
+    try {
+      var res = await fetch('/kernel/variables', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notebook_id: parseInt(id) })
+      });
+      var d = await res.json();
+      var content = document.getElementById('vars-content');
+      if (!content) return;
+      var vars = d.variables || [];
+      if (!vars.length) {
+        content.innerHTML = '<span class="text-zinc-600 italic">No variables</span>';
+        return;
+      }
+      var html = '<table class="w-full"><thead><tr class="text-zinc-500 border-b border-zinc-800">' +
+        '<th class="text-left py-1 pr-2">Name</th><th class="text-left py-1 pr-2">Type</th>' +
+        '<th class="text-left py-1">Shape/Size</th></tr></thead><tbody>';
+      vars.forEach(function (v) {
+        var extra = v.shape || v.size || '';
+        if (v.dtype) extra += (extra ? ' ' : '') + v.dtype;
+        html += '<tr class="border-b border-zinc-800/50"><td class="py-1 pr-2 text-indigo-300">' +
+          v.name + '</td><td class="py-1 pr-2 text-zinc-500">' + v.type +
+          '</td><td class="py-1 text-zinc-600">' + extra + '</td></tr>';
+      });
+      html += '</tbody></table>';
+      content.innerHTML = html;
+    } catch (_) {}
+  }, 5000);
 })();

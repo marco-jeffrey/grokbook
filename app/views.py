@@ -66,16 +66,27 @@ def header_bar():
                 ),
             ),
         ),
-        Button(
-            data.on(
-                "click",
-                at.post("/kernel/restart", include=["notebook_id"]),
+        Div(
+            {"class": "flex items-center gap-2"},
+            Button(
+                data.on("click", "$show_vars = !$show_vars"),
+                {
+                    "class": "text-xs text-zinc-500 hover:text-zinc-200 transition-colors "
+                    "cursor-pointer px-3 py-1 rounded border border-zinc-700 hover:border-zinc-500"
+                },
+                "Vars",
             ),
-            {
-                "class": "text-xs text-zinc-500 hover:text-zinc-200 transition-colors "
-                "cursor-pointer px-3 py-1 rounded border border-zinc-700 hover:border-zinc-500"
-            },
-            "↺ Restart Kernel",
+            Button(
+                data.on(
+                    "click",
+                    at.post("/kernel/restart", include=["notebook_id"]),
+                ),
+                {
+                    "class": "text-xs text-zinc-500 hover:text-zinc-200 transition-colors "
+                    "cursor-pointer px-3 py-1 rounded border border-zinc-700 hover:border-zinc-500"
+                },
+                "↺ Restart Kernel",
+            ),
         ),
     )
 
@@ -519,6 +530,31 @@ def notebook(cells: list[Cell], nb_id: int):
     )
 
 
+def variables_panel():
+    """Right sidebar for kernel variables — fetched via polling when visible."""
+    return Div(
+        data.show("$show_vars"),
+        {
+            "id": "vars-panel",
+            "class": "fixed right-0 top-12 w-72 h-[calc(100vh-3rem)] bg-zinc-900 "
+            "border-l border-zinc-800 overflow-y-auto z-30",
+        },
+        Div(
+            {"class": "p-4"},
+            Div(
+                {"class": "flex items-center justify-between mb-3"},
+                Span({"class": "text-xs font-semibold text-zinc-500 uppercase tracking-wider"}, "Variables"),
+                Button(
+                    data.on("click", "$show_vars = false"),
+                    {"class": "text-xs text-zinc-600 hover:text-zinc-300 cursor-pointer"},
+                    "✕",
+                ),
+            ),
+            Div({"id": "vars-content", "class": "text-xs font-mono text-zinc-400"}, "Loading..."),
+        ),
+    )
+
+
 def page(
     nb: Notebook,
     notebooks: list[Notebook],
@@ -547,6 +583,7 @@ def page(
                     "last_status": "",
                     "focus_cell": "",
                     "kernel_state": "idle",
+                    "show_vars": False,
                 }
             ),
             data.init(at.get("/events")),
@@ -566,6 +603,7 @@ def page(
                 ),
             ),
             execution_indicator(),
+            variables_panel(),
             Script({"src": url_for("static", "js/app.js")}),
         ),
     )

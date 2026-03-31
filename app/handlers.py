@@ -350,6 +350,16 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
 
     # ── kernel ────────────────────────────────────────────────────────────
 
+    async def kernel_variables(c: Context, w: Writer) -> None:
+        signals = await get_signals(c.req)
+        nb_id = int(signals.get("notebook_id", 0))
+        if not nb_id:
+            w.json({"variables": []})
+            return
+        km = await pool.get(nb_id)
+        variables = await km.get_variables()
+        w.json({"variables": variables})
+
     async def kernel_restart(c: Context, w: Writer) -> None:
         signals = await get_signals(c.req)
         nb_id = int(signals.get("notebook_id", 0))
@@ -405,6 +415,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router.post("/cells/new-below/*", add_cell_below)
     router.post("/cells/convert/*", convert_cell)
     router.post("/kernel/restart", kernel_restart)
+    router.post("/kernel/variables", kernel_variables)
     router.post("/complete", complete_handler)
     router.post("/inspect", inspect_handler)
 

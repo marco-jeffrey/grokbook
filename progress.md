@@ -39,10 +39,10 @@
 - [x] Commit
 
 ## Feature 7: Kernel Variables Inspector
-- [ ] kernel.py — get_variables()
-- [ ] handlers.py — /kernel/variables endpoint
-- [ ] views.py — variables panel
-- [ ] Commit
+- [x] kernel.py — get_variables()
+- [x] handlers.py — /kernel/variables endpoint
+- [x] views.py — variables panel + JS polling
+- [x] Commit
 
 ## Feature 8: Auto-reconnect SSE
 - [ ] views.py — retry config

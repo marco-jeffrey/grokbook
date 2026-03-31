@@ -138,6 +138,47 @@ class KernelManager:
             return "".join(b["data"] for b in blocks)
         return json.dumps(blocks)
 
+    _VARS_SNIPPET = (
+        "import json as _json\n"
+        "_vars = []\n"
+        "for _n, _v in list(globals().items()):\n"
+        "    if _n.startswith('_') or _n in ('In','Out','get_ipython','exit','quit'): continue\n"
+        "    _info = {'name': _n, 'type': type(_v).__name__}\n"
+        "    if hasattr(_v, 'shape'): _info['shape'] = str(_v.shape)\n"
+        "    if hasattr(_v, 'dtype'): _info['dtype'] = str(_v.dtype)\n"
+        "    try:\n"
+        "        _info['size'] = str(len(_v))\n"
+        "    except TypeError:\n"
+        "        pass\n"
+        "    _vars.append(_info)\n"
+        "print(_json.dumps(_vars))\n"
+        "del _json, _vars, _n, _v, _info\n"
+    )
+
+    async def get_variables(self) -> list[dict]:
+        """Run introspection snippet and return list of variable dicts."""
+        async with self._lock:
+            msg_id = self._kc.execute(self._VARS_SNIPPET, silent=True)
+            output = ""
+            while True:
+                try:
+                    msg = await self._kc.get_iopub_msg(timeout=2)
+                except (TimeoutError, Empty):
+                    if not await self._km.is_alive():
+                        break
+                    continue
+                if msg["parent_header"].get("msg_id") != msg_id:
+                    continue
+                t = msg["msg_type"]
+                if t == "stream":
+                    output += msg["content"]["text"]
+                elif t == "status" and msg["content"]["execution_state"] == "idle":
+                    break
+            try:
+                return json.loads(output)
+            except (json.JSONDecodeError, TypeError):
+                return []
+
     async def inspect(self, code: str, cursor_pos: int) -> str:
         """Return plain-text docstring/signature for object at cursor."""
         async with self._lock:
