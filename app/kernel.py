@@ -15,7 +15,11 @@ class KernelManager:
     def __init__(self, python_path: str | None = None) -> None:
         self._km = _KM(kernel_name="python3")
         if python_path:
-            self._km.kernel_cmd = [
+            # kernel_cmd is ignored by modern jupyter_client — override the
+            # kernel spec's argv directly so the provisioner launches the
+            # correct interpreter.
+            spec = self._km.kernel_spec
+            spec.argv = [
                 python_path, "-m", "ipykernel_launcher", "-f", "{connection_file}"
             ]
         self._kc = None
