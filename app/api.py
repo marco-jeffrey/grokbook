@@ -267,6 +267,52 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         w.json({"results": results})
         relay.publish(f"notebook.{nb_id}.cell_executed", "cell")
 
+    # ── insert cell at position ───────────────────────────────────────────
+
+    async def insert_cell(c: Context, w: Writer) -> None:
+        body = await c.req.json()
+        notebook_id = body.get("notebook_id")
+        after_cell_id = body.get("after_cell_id")
+        cell_type = body.get("cell_type", "code")
+        code = body.get("code", "")
+
+        if not notebook_id:
+            w.json({"error": "notebook_id required"}, 400)
+            return
+
+        if after_cell_id:
+            cell_id = await db.insert_cell_at(notebook_id, after_cell_id, "below", cell_type=cell_type)
+        else:
+            cell_id = await db.insert_cell(notebook_id, cell_type=cell_type)
+
+        if code:
+            await db.update_input(cell_id, code)
+
+        cell = await db.get_cell(cell_id)
+        w.json(_serialize_cell(cell))
+        relay.publish(f"notebook.{notebook_id}.cell_created", "cell")
+
+    # ── change cell type ───────────────────────────────────────────────────
+
+    async def change_cell_type(c: Context, w: Writer) -> None:
+        try:
+            cell_id = int(c.req.tail)
+        except ValueError:
+            w.json({"error": "invalid cell id"}, 400)
+            return
+        body = await c.req.json()
+        cell_type = body.get("cell_type", "code")
+        if cell_type not in ("code", "markdown"):
+            w.json({"error": "cell_type must be 'code' or 'markdown'"}, 400)
+            return
+        await db.update_cell_type(cell_id, cell_type)
+        cell = await db.get_cell(cell_id)
+        if cell:
+            w.json(_serialize_cell(cell))
+            relay.publish(f"notebook.{cell.notebook_id}.cell_updated", "cell")
+        else:
+            w.json({"error": "not found"}, 404)
+
     # ── kernel ────────────────────────────────────────────────────────────
 
     async def kernel_status(c: Context, w: Writer) -> None:
@@ -288,6 +334,16 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         w.json({"state": "idle"})
         relay.publish(f"notebook.{nb_id}.kernel_restarted", "kernel")
 
+    async def kernel_variables(c: Context, w: Writer) -> None:
+        try:
+            nb_id = int(c.req.tail)
+        except ValueError:
+            w.json({"error": "invalid notebook id"}, 400)
+            return
+        km = await pool.get(nb_id)
+        variables = await km.get_variables()
+        w.json({"variables": variables})
+
     async def kernel_interrupt(c: Context, w: Writer) -> None:
         try:
             nb_id = int(c.req.tail)
@@ -308,15 +364,18 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router.delete("/notebooks/*", delete_notebook)
 
     router.post("/cells", create_cell)
+    router.post("/cells/insert", insert_cell)
     router.post("/cells/run-all/*", run_all_cells)
     router.post("/cells/execute/*", execute_cell)
     router.post("/cells/move/*", move_cell)
     router.post("/cells/duplicate/*", duplicate_cell_api)
+    router.post("/cells/type/*", change_cell_type)
     router.get("/cells/*", get_cell)
     router.put("/cells/*", update_cell)
     router.delete("/cells/*", delete_cell)
 
     router.get("/kernel/status/*", kernel_status)
+    router.get("/kernel/variables/*", kernel_variables)
     router.post("/kernel/interrupt/*", kernel_interrupt)
     router.post("/kernel/restart/*", kernel_restart)
 
