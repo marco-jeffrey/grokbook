@@ -50,9 +50,9 @@
 - [x] Commit
 
 ## Feature 9: OpenAI-Compatible Endpoint
-- [ ] app/openai.py — tool definitions, dispatch, /chat/completions
-- [ ] main.py — mount /v1
-- [ ] Commit
+- [x] app/openai.py — tool definitions, dispatch, /chat/completions
+- [x] main.py — mount /v1
+- [x] Commit
 
 ## Feature 10: Dark/Light Theme Toggle
 - [ ] views.py — theme signal, dark: classes, toggle button
