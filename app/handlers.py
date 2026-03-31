@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from stario import Relay
 from stario.datastar.signals import get_signals
@@ -216,6 +217,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         is_error = False
         exec_count = 0
 
+        t0 = time.monotonic()
         async for output, is_error, is_final, exec_count in km.execute_streaming(code):
             w.patch(
                 element=_render_output(output, is_error, cell_id),
@@ -223,9 +225,10 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             )
             if is_final:
                 break
+        elapsed = time.monotonic() - t0
 
         status = "error" if is_error else "ok"
-        await db.update_cell(cell_id, input=code, output=output, status=status, execution_count=exec_count)
+        await db.update_cell(cell_id, input=code, output=output, status=status, execution_count=exec_count, execution_time=elapsed)
         await db.touch_notebook(nb_id)
         return status
 
@@ -391,9 +394,11 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             for cell in cells:
                 if cell.cell_type != "code" or not cell.input.strip():
                     continue
+                t0 = time.monotonic()
                 output, is_error, exec_count = await km.execute(cell.input)
+                elapsed = time.monotonic() - t0
                 status = "error" if is_error else "ok"
-                await db.update_cell(cell.id, input=cell.input, output=output, status=status, execution_count=exec_count)
+                await db.update_cell(cell.id, input=cell.input, output=output, status=status, execution_count=exec_count, execution_time=elapsed)
                 # Patch after each cell so user sees progress
                 w.patch(element=_render_output(output, is_error, cell.id), selector=f"#output-{cell.id}")
                 if is_error:

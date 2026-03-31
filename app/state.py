@@ -17,3 +17,4 @@ class Cell:
     output: str = ""
     status: str = ""  # "", "ok", "error"
     execution_count: int = 0
+    execution_time: float = 0.0

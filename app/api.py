@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from stario import Relay
 from stario.http import Router
@@ -18,6 +19,7 @@ def _serialize_cell(cell: Cell) -> dict:
         "output": cell.output,
         "status": cell.status,
         "execution_count": cell.execution_count,
+        "execution_time": cell.execution_time,
     }
 
 
@@ -221,9 +223,11 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
 
         # Shield so execution + DB write complete even if connection drops
         async def _run():
+            t0 = time.monotonic()
             output, is_error, exec_count = await km.execute(cell.input)
+            elapsed = time.monotonic() - t0
             status = "error" if is_error else "ok"
-            await db.update_cell(cell_id, input=cell.input, output=output, status=status, execution_count=exec_count)
+            await db.update_cell(cell_id, input=cell.input, output=output, status=status, execution_count=exec_count, execution_time=elapsed)
             await db.touch_notebook(nb_id)
             return output, status
 
@@ -251,9 +255,11 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         for cell in cells:
             if cell.cell_type != "code" or not cell.input.strip():
                 continue
+            t0 = time.monotonic()
             output, is_error, exec_count = await km.execute(cell.input)
+            elapsed = time.monotonic() - t0
             status = "error" if is_error else "ok"
-            await db.update_cell(cell.id, input=cell.input, output=output, status=status, execution_count=exec_count)
+            await db.update_cell(cell.id, input=cell.input, output=output, status=status, execution_count=exec_count, execution_time=elapsed)
             results.append({"cell_id": cell.id, "status": status})
             if is_error:
                 break

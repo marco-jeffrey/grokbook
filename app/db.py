@@ -6,7 +6,7 @@ from app.state import Cell, Notebook
 
 log = logging.getLogger(__name__)
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 _CREATE_NOTEBOOKS = """
 CREATE TABLE IF NOT EXISTS notebooks (
@@ -40,6 +40,7 @@ def _row_to_cell(r) -> Cell:
         output=r["output"],
         status=r["status"],
         execution_count=r["execution_count"] if "execution_count" in keys else 0,
+        execution_time=r["execution_time"] if "execution_time" in keys else 0.0,
     )
 
 
@@ -141,10 +142,24 @@ async def _migrate_v2_to_v3(conn: aiosqlite.Connection) -> None:
         )
 
 
+async def _migrate_v3_to_v4(conn: aiosqlite.Connection) -> None:
+    """V4: Add execution_time column to cells."""
+    log.info("Migration v3→v4: adding execution_time to cells")
+    async with conn.execute(
+        "SELECT COUNT(*) AS n FROM pragma_table_info('cells') WHERE name = 'execution_time'"
+    ) as cur:
+        row = await cur.fetchone()
+    if row["n"] == 0:
+        await conn.execute(
+            "ALTER TABLE cells ADD COLUMN execution_time REAL NOT NULL DEFAULT 0.0"
+        )
+
+
 _MIGRATIONS = [
     (0, 1, _migrate_v0_to_v1),
     (1, 2, _migrate_v1_to_v2),
     (2, 3, _migrate_v2_to_v3),
+    (3, 4, _migrate_v3_to_v4),
 ]
 
 
@@ -239,7 +254,7 @@ class Database:
 
     async def get_all_cells(self, notebook_id: int) -> list[Cell]:
         async with self._conn.execute(
-            "SELECT id, notebook_id, cell_type, input, output, status, execution_count FROM cells "
+            "SELECT id, notebook_id, cell_type, input, output, status, execution_count, execution_time FROM cells "
             "WHERE notebook_id = ? ORDER BY order_index",
             (notebook_id,),
         ) as cur:
@@ -248,7 +263,7 @@ class Database:
 
     async def get_cell(self, cell_id: int) -> Cell | None:
         async with self._conn.execute(
-            "SELECT id, notebook_id, cell_type, input, output, status, execution_count FROM cells WHERE id = ?",
+            "SELECT id, notebook_id, cell_type, input, output, status, execution_count, execution_time FROM cells WHERE id = ?",
             (cell_id,),
         ) as cur:
             r = await cur.fetchone()
@@ -269,11 +284,11 @@ class Database:
         return cur.lastrowid
 
     async def update_cell(
-        self, cell_id: int, input: str, output: str, status: str, execution_count: int = 0
+        self, cell_id: int, input: str, output: str, status: str, execution_count: int = 0, execution_time: float = 0.0
     ) -> None:
         await self._conn.execute(
-            "UPDATE cells SET input = ?, output = ?, status = ?, execution_count = ? WHERE id = ?",
-            (input, output, status, execution_count, cell_id),
+            "UPDATE cells SET input = ?, output = ?, status = ?, execution_count = ?, execution_time = ? WHERE id = ?",
+            (input, output, status, execution_count, execution_time, cell_id),
         )
         await self._conn.commit()
 

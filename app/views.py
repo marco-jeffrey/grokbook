@@ -522,6 +522,10 @@ def _code_cell_view(cell: Cell):
             {"class": "flex items-start"},
             _exec_label("Out", cell.execution_count) if cell.output else SafeString(""),
             Div({"class": "flex-1"}, _render_output(cell.output, is_error, cell.id)),
+            Span(
+                {"class": "text-xs text-zinc-600 ml-2 shrink-0 pt-3"},
+                f"{cell.execution_time:.2f}s",
+            ) if cell.execution_time > 0 else SafeString(""),
         ),
     )
 
