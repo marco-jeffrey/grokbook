@@ -265,10 +265,12 @@ def _render_output_block(block: dict):
     )
 
 
-def _render_output(output: str, is_error: bool):
+def _render_output(output: str, is_error: bool, cell_id: int | None = None):
     """Render cell output — handles both plain text and rich JSON blocks."""
+    id_attr = {"id": f"output-{cell_id}"} if cell_id else {}
+
     if not output:
-        return SafeString("")
+        return Div(id_attr) if cell_id else SafeString("")
 
     base_class = (
         "mt-2 rounded-lg border p-4 "
@@ -282,6 +284,7 @@ def _render_output(output: str, is_error: bool):
             blocks = json.loads(output)
             if isinstance(blocks, list) and blocks and "mime" in blocks[0]:
                 return Div(
+                    id_attr,
                     {"class": base_class},
                     *[_render_output_block(b) for b in blocks],
                 )
@@ -289,7 +292,7 @@ def _render_output(output: str, is_error: bool):
             pass
 
     # Plain text fallback
-    return Pre({"class": base_class + " font-mono text-sm whitespace-pre-wrap break-words"}, SafeString(_e.escape(output)))
+    return Pre(id_attr, {"class": base_class + " font-mono text-sm whitespace-pre-wrap break-words"}, SafeString(_e.escape(output)))
 
 
 def _cell_toolbar(cell: Cell):
@@ -358,7 +361,7 @@ def _code_cell_view(cell: Cell):
             Span({"class": "text-green-400"}, "✓") if cell.status == "ok" else SafeString(""),
             Span({"class": "text-red-400"}, "✗") if cell.status == "error" else SafeString(""),
         ),
-        _render_output(cell.output, is_error),
+        _render_output(cell.output, is_error, cell.id),
     )
 
 

@@ -74,15 +74,60 @@ class KernelManager:
                 elif t == "status" and msg["content"]["execution_state"] == "idle":
                     break
 
-            if not blocks:
-                return "(no output)", is_error
+            return self._blocks_to_output(blocks, has_rich), is_error
 
-            # If all outputs are text/plain, return as plain string (backward compat)
-            if not has_rich:
-                return "".join(b["data"] for b in blocks), is_error
+    async def execute_streaming(self, code: str):
+        """Async generator that yields (output_str, is_error, is_final) tuples.
 
-            # Rich output — JSON-encode the block list
-            return json.dumps(blocks), is_error
+        Each yield contains the accumulated output so far. The lock is held
+        for the entire execution. Callers can patch the UI on each yield."""
+        async with self._lock:
+            msg_id = self._kc.execute(code)
+            blocks: list[dict] = []
+            is_error = False
+            has_rich = False
+
+            while True:
+                try:
+                    msg = await self._kc.get_iopub_msg(timeout=1)
+                except (TimeoutError, Empty):
+                    if not await self._km.is_alive():
+                        blocks.append({"mime": "text/plain", "data": "(kernel died during execution)"})
+                        is_error = True
+                        yield self._blocks_to_output(blocks, has_rich), is_error, True
+                        return
+                    continue
+
+                if msg["parent_header"].get("msg_id") != msg_id:
+                    continue
+                t = msg["msg_type"]
+                if t == "stream":
+                    blocks.append({"mime": "text/plain", "data": msg["content"]["text"]})
+                    yield self._blocks_to_output(blocks, has_rich), is_error, False
+                elif t in ("execute_result", "display_data"):
+                    block = self._extract_rich(msg["content"]["data"])
+                    if block:
+                        if block["mime"] != "text/plain":
+                            has_rich = True
+                        blocks.append(block)
+                        yield self._blocks_to_output(blocks, has_rich), is_error, False
+                elif t == "error":
+                    is_error = True
+                    tb = msg["content"]["traceback"]
+                    blocks.append({"mime": "text/plain", "data": "\n".join(_ANSI.sub("", line) for line in tb)})
+                    yield self._blocks_to_output(blocks, has_rich), is_error, True
+                    return
+                elif t == "status" and msg["content"]["execution_state"] == "idle":
+                    yield self._blocks_to_output(blocks, has_rich), is_error, True
+                    return
+
+    @staticmethod
+    def _blocks_to_output(blocks: list[dict], has_rich: bool) -> str:
+        if not blocks:
+            return "(no output)"
+        if not has_rich:
+            return "".join(b["data"] for b in blocks)
+        return json.dumps(blocks)
 
     async def inspect(self, code: str, cursor_pos: int) -> str:
         """Return plain-text docstring/signature for object at cursor."""

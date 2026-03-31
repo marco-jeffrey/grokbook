@@ -21,10 +21,10 @@
 - [x] Commit
 
 ## Feature 4: Streaming Kernel Output
-- [ ] kernel.py — execute_streaming() async generator
-- [ ] views.py — output container id
-- [ ] handlers.py — streaming execute with w.patch()
-- [ ] Commit
+- [x] kernel.py — execute_streaming() async generator
+- [x] views.py — output container id
+- [x] handlers.py — streaming execute with w.patch()
+- [x] Commit
 
 ## Feature 5: Execution Counter
 - [ ] state.py — execution_count field

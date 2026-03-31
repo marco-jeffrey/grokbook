@@ -7,7 +7,7 @@ from stario.http.types import Context, Writer
 
 from app.db import Database
 from app.kernel import KernelPool
-from app.views import notebook, page, sidebar_view
+from app.views import _render_output, notebook, page, sidebar_view
 
 
 def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
@@ -181,10 +181,21 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             await _patch_notebook(w, nb_id)
             relay.publish(f"notebook.{nb_id}.cell_updated", "cell")
 
-    async def _run_and_save(cell_id: int, nb_id: int, code: str) -> str:
-        """Execute code and write result to DB. Always runs to completion."""
+    async def _stream_execute(cell_id: int, nb_id: int, code: str, w: Writer) -> str:
+        """Stream execution output to the browser, then save to DB."""
         km = await pool.get(nb_id)
-        output, is_error = await km.execute(code)
+        output = "(no output)"
+        is_error = False
+
+        async for output, is_error, is_final in km.execute_streaming(code):
+            # Patch the output element on each yield
+            w.patch(
+                element=_render_output(output, is_error, cell_id),
+                selector=f"#output-{cell_id}",
+            )
+            if is_final:
+                break
+
         status = "error" if is_error else "ok"
         await db.update_cell(cell_id, input=code, output=output, status=status)
         await db.touch_notebook(nb_id)
@@ -205,7 +216,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         code = signals.get(f"cell_{cell_id}", "")
 
         # Shield so execution + DB write complete even if connection drops
-        task = asyncio.create_task(_run_and_save(cell_id, nb_id, code))
+        task = asyncio.create_task(_stream_execute(cell_id, nb_id, code, w))
         try:
             status = await asyncio.shield(task)
         except asyncio.CancelledError:
