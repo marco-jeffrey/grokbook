@@ -27,12 +27,12 @@
 - [x] Commit
 
 ## Feature 5: Execution Counter
-- [ ] state.py — execution_count field
-- [ ] db.py — schema migration, column
-- [ ] kernel.py — return execution_count
-- [ ] handlers.py + api.py — thread execution_count
-- [ ] views.py — In[N]/Out[N] labels
-- [ ] Commit
+- [x] state.py — execution_count field
+- [x] db.py — schema migration, column
+- [x] kernel.py — return execution_count
+- [x] handlers.py + api.py — thread execution_count
+- [x] views.py — In[N]/Out[N] labels
+- [x] Commit
 
 ## Feature 6: Cell Output Collapse/Expand
 - [ ] views.py — collapse logic for large outputs

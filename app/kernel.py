@@ -35,16 +35,16 @@ class KernelManager:
                 return {"mime": mime, "data": data[mime]}
         return None
 
-    async def execute(self, code: str) -> tuple[str, bool]:
+    async def execute(self, code: str) -> tuple[str, bool, int]:
         """Execute code in the persistent kernel. Serialised via lock.
         No arbitrary timeout — waits as long as the kernel is alive.
-        Returns (output_string, is_error). When rich outputs are present,
-        output_string is a JSON-encoded list of {mime, data} blocks."""
+        Returns (output_string, is_error, execution_count)."""
         async with self._lock:
             msg_id = self._kc.execute(code)
             blocks: list[dict] = []
             is_error = False
             has_rich = False
+            exec_count = 0
 
             while True:
                 try:
@@ -62,6 +62,8 @@ class KernelManager:
                 if t == "stream":
                     blocks.append({"mime": "text/plain", "data": msg["content"]["text"]})
                 elif t in ("execute_result", "display_data"):
+                    if t == "execute_result":
+                        exec_count = msg["content"].get("execution_count", exec_count)
                     block = self._extract_rich(msg["content"]["data"])
                     if block:
                         if block["mime"] != "text/plain":
@@ -71,13 +73,15 @@ class KernelManager:
                     is_error = True
                     tb = msg["content"]["traceback"]
                     blocks.append({"mime": "text/plain", "data": "\n".join(_ANSI.sub("", line) for line in tb)})
+                elif t == "execute_input":
+                    exec_count = msg["content"].get("execution_count", exec_count)
                 elif t == "status" and msg["content"]["execution_state"] == "idle":
                     break
 
-            return self._blocks_to_output(blocks, has_rich), is_error
+            return self._blocks_to_output(blocks, has_rich), is_error, exec_count
 
     async def execute_streaming(self, code: str):
-        """Async generator that yields (output_str, is_error, is_final) tuples.
+        """Async generator that yields (output_str, is_error, is_final, exec_count) tuples.
 
         Each yield contains the accumulated output so far. The lock is held
         for the entire execution. Callers can patch the UI on each yield."""
@@ -86,6 +90,7 @@ class KernelManager:
             blocks: list[dict] = []
             is_error = False
             has_rich = False
+            exec_count = 0
 
             while True:
                 try:
@@ -94,7 +99,7 @@ class KernelManager:
                     if not await self._km.is_alive():
                         blocks.append({"mime": "text/plain", "data": "(kernel died during execution)"})
                         is_error = True
-                        yield self._blocks_to_output(blocks, has_rich), is_error, True
+                        yield self._blocks_to_output(blocks, has_rich), is_error, True, exec_count
                         return
                     continue
 
@@ -103,22 +108,26 @@ class KernelManager:
                 t = msg["msg_type"]
                 if t == "stream":
                     blocks.append({"mime": "text/plain", "data": msg["content"]["text"]})
-                    yield self._blocks_to_output(blocks, has_rich), is_error, False
+                    yield self._blocks_to_output(blocks, has_rich), is_error, False, exec_count
                 elif t in ("execute_result", "display_data"):
+                    if t == "execute_result":
+                        exec_count = msg["content"].get("execution_count", exec_count)
                     block = self._extract_rich(msg["content"]["data"])
                     if block:
                         if block["mime"] != "text/plain":
                             has_rich = True
                         blocks.append(block)
-                        yield self._blocks_to_output(blocks, has_rich), is_error, False
+                        yield self._blocks_to_output(blocks, has_rich), is_error, False, exec_count
                 elif t == "error":
                     is_error = True
                     tb = msg["content"]["traceback"]
                     blocks.append({"mime": "text/plain", "data": "\n".join(_ANSI.sub("", line) for line in tb)})
-                    yield self._blocks_to_output(blocks, has_rich), is_error, True
+                    yield self._blocks_to_output(blocks, has_rich), is_error, True, exec_count
                     return
+                elif t == "execute_input":
+                    exec_count = msg["content"].get("execution_count", exec_count)
                 elif t == "status" and msg["content"]["execution_state"] == "idle":
-                    yield self._blocks_to_output(blocks, has_rich), is_error, True
+                    yield self._blocks_to_output(blocks, has_rich), is_error, True, exec_count
                     return
 
     @staticmethod

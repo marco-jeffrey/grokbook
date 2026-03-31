@@ -186,9 +186,9 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         km = await pool.get(nb_id)
         output = "(no output)"
         is_error = False
+        exec_count = 0
 
-        async for output, is_error, is_final in km.execute_streaming(code):
-            # Patch the output element on each yield
+        async for output, is_error, is_final, exec_count in km.execute_streaming(code):
             w.patch(
                 element=_render_output(output, is_error, cell_id),
                 selector=f"#output-{cell_id}",
@@ -197,7 +197,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
                 break
 
         status = "error" if is_error else "ok"
-        await db.update_cell(cell_id, input=code, output=output, status=status)
+        await db.update_cell(cell_id, input=code, output=output, status=status, execution_count=exec_count)
         await db.touch_notebook(nb_id)
         return status
 

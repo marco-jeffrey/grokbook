@@ -17,6 +17,7 @@ def _serialize_cell(cell: Cell) -> dict:
         "input": cell.input,
         "output": cell.output,
         "status": cell.status,
+        "execution_count": cell.execution_count,
     }
 
 
@@ -220,9 +221,9 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
 
         # Shield so execution + DB write complete even if connection drops
         async def _run():
-            output, is_error = await km.execute(cell.input)
+            output, is_error, exec_count = await km.execute(cell.input)
             status = "error" if is_error else "ok"
-            await db.update_cell(cell_id, input=cell.input, output=output, status=status)
+            await db.update_cell(cell_id, input=cell.input, output=output, status=status, execution_count=exec_count)
             await db.touch_notebook(nb_id)
             return output, status
 

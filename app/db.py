@@ -6,7 +6,7 @@ from app.state import Cell, Notebook
 
 log = logging.getLogger(__name__)
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 _CREATE_NOTEBOOKS = """
 CREATE TABLE IF NOT EXISTS notebooks (
@@ -31,13 +31,15 @@ CREATE TABLE IF NOT EXISTS cells (
 
 
 def _row_to_cell(r) -> Cell:
+    keys = r.keys()
     return Cell(
         id=r["id"],
         notebook_id=r["notebook_id"],
-        cell_type=r["cell_type"] if "cell_type" in r.keys() else "code",
+        cell_type=r["cell_type"] if "cell_type" in keys else "code",
         input=r["input"],
         output=r["output"],
         status=r["status"],
+        execution_count=r["execution_count"] if "execution_count" in keys else 0,
     )
 
 
@@ -126,9 +128,23 @@ async def _migrate_v1_to_v2(conn: aiosqlite.Connection) -> None:
     log.info("Migration v1→v2: stamping schema version")
 
 
+async def _migrate_v2_to_v3(conn: aiosqlite.Connection) -> None:
+    """V3: Add execution_count column to cells."""
+    log.info("Migration v2→v3: adding execution_count to cells")
+    async with conn.execute(
+        "SELECT COUNT(*) AS n FROM pragma_table_info('cells') WHERE name = 'execution_count'"
+    ) as cur:
+        row = await cur.fetchone()
+    if row["n"] == 0:
+        await conn.execute(
+            "ALTER TABLE cells ADD COLUMN execution_count INTEGER NOT NULL DEFAULT 0"
+        )
+
+
 _MIGRATIONS = [
     (0, 1, _migrate_v0_to_v1),
     (1, 2, _migrate_v1_to_v2),
+    (2, 3, _migrate_v2_to_v3),
 ]
 
 
@@ -206,9 +222,9 @@ class Database:
         cells = await self.get_all_cells(nb_id)
         for i, cell in enumerate(cells):
             await self._conn.execute(
-                "INSERT INTO cells (notebook_id, order_index, cell_type, input, output, status) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (new_id, i, cell.cell_type, cell.input, cell.output, cell.status),
+                "INSERT INTO cells (notebook_id, order_index, cell_type, input, output, status, execution_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (new_id, i, cell.cell_type, cell.input, cell.output, cell.status, cell.execution_count),
             )
         await self._conn.commit()
         return new_id
@@ -223,7 +239,7 @@ class Database:
 
     async def get_all_cells(self, notebook_id: int) -> list[Cell]:
         async with self._conn.execute(
-            "SELECT id, notebook_id, cell_type, input, output, status FROM cells "
+            "SELECT id, notebook_id, cell_type, input, output, status, execution_count FROM cells "
             "WHERE notebook_id = ? ORDER BY order_index",
             (notebook_id,),
         ) as cur:
@@ -232,7 +248,7 @@ class Database:
 
     async def get_cell(self, cell_id: int) -> Cell | None:
         async with self._conn.execute(
-            "SELECT id, notebook_id, cell_type, input, output, status FROM cells WHERE id = ?",
+            "SELECT id, notebook_id, cell_type, input, output, status, execution_count FROM cells WHERE id = ?",
             (cell_id,),
         ) as cur:
             r = await cur.fetchone()
@@ -253,11 +269,11 @@ class Database:
         return cur.lastrowid
 
     async def update_cell(
-        self, cell_id: int, input: str, output: str, status: str
+        self, cell_id: int, input: str, output: str, status: str, execution_count: int = 0
     ) -> None:
         await self._conn.execute(
-            "UPDATE cells SET input = ?, output = ?, status = ? WHERE id = ?",
-            (input, output, status, cell_id),
+            "UPDATE cells SET input = ?, output = ?, status = ?, execution_count = ? WHERE id = ?",
+            (input, output, status, execution_count, cell_id),
         )
         await self._conn.commit()
 

@@ -310,6 +310,15 @@ def _cell_toolbar(cell: Cell):
     )
 
 
+def _exec_label(prefix: str, count: int):
+    """Render In [N]: or Out[N]: label."""
+    n = str(count) if count > 0 else " "
+    return Span(
+        {"class": "text-xs font-mono text-zinc-500 select-none mr-2 shrink-0 w-16 text-right"},
+        f"{prefix}[{n}]:",
+    )
+
+
 def _code_cell_view(cell: Cell):
     is_error = cell.status == "error"
     sig = f"cell_{cell.id}"
@@ -318,34 +327,38 @@ def _code_cell_view(cell: Cell):
         _cell_toolbar(cell),
         data.signals({sig: cell.input}),
         Div(
-            {"class": "relative"},
-            Textarea(
-                cell.input,
-                data.bind(sig),
-                {
-                    "data-cell-id": str(cell.id),
-                    "spellcheck": "false",
-                    "class": (
-                        "w-full min-h-[4.5rem] p-3 bg-zinc-900 border border-zinc-700 rounded-lg "
-                        "text-zinc-200 font-mono text-sm leading-relaxed resize-none outline-none "
-                        "focus:border-indigo-500 transition-colors overflow-hidden"
-                    ),
-                },
-            ),
+            {"class": "flex items-start"},
+            _exec_label("In", cell.execution_count),
             Div(
-                {
-                    "id": f"completions-{cell.id}",
-                    "class": "hidden absolute z-50 min-w-48 max-h-48 overflow-y-auto "
-                    "bg-zinc-800 border border-zinc-600 rounded-lg shadow-xl",
-                }
-            ),
-            Div(
-                {
-                    "id": f"signature-{cell.id}",
-                    "class": "hidden absolute z-50 max-w-xl max-h-56 overflow-y-auto "
-                    "bg-zinc-900 border border-indigo-800 rounded-lg shadow-xl "
-                    "px-3 py-2 font-mono text-xs text-zinc-300 whitespace-pre-wrap",
-                }
+                {"class": "flex-1 relative"},
+                Textarea(
+                    cell.input,
+                    data.bind(sig),
+                    {
+                        "data-cell-id": str(cell.id),
+                        "spellcheck": "false",
+                        "class": (
+                            "w-full min-h-[4.5rem] p-3 bg-zinc-900 border border-zinc-700 rounded-lg "
+                            "text-zinc-200 font-mono text-sm leading-relaxed resize-none outline-none "
+                            "focus:border-indigo-500 transition-colors overflow-hidden"
+                        ),
+                    },
+                ),
+                Div(
+                    {
+                        "id": f"completions-{cell.id}",
+                        "class": "hidden absolute z-50 min-w-48 max-h-48 overflow-y-auto "
+                        "bg-zinc-800 border border-zinc-600 rounded-lg shadow-xl",
+                    }
+                ),
+                Div(
+                    {
+                        "id": f"signature-{cell.id}",
+                        "class": "hidden absolute z-50 max-w-xl max-h-56 overflow-y-auto "
+                        "bg-zinc-900 border border-indigo-800 rounded-lg shadow-xl "
+                        "px-3 py-2 font-mono text-xs text-zinc-300 whitespace-pre-wrap",
+                    }
+                ),
             ),
         ),
         # Hidden button — Shift+Enter clicks this to trigger Datastar indicator
@@ -356,12 +369,16 @@ def _code_cell_view(cell: Cell):
         ),
         # Status hint
         Div(
-            {"class": "mt-1 flex items-center gap-2 text-xs"},
+            {"class": "mt-1 flex items-center gap-2 text-xs ml-18"},
             Span({"class": "text-zinc-600"}, "shift+enter to run"),
             Span({"class": "text-green-400"}, "✓") if cell.status == "ok" else SafeString(""),
             Span({"class": "text-red-400"}, "✗") if cell.status == "error" else SafeString(""),
         ),
-        _render_output(cell.output, is_error, cell.id),
+        Div(
+            {"class": "flex items-start"},
+            _exec_label("Out", cell.execution_count) if cell.output else SafeString(""),
+            Div({"class": "flex-1"}, _render_output(cell.output, is_error, cell.id)),
+        ),
     )
 
 
