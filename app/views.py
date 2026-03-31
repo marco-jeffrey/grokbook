@@ -77,10 +77,7 @@ def header_bar():
                 "Vars",
             ),
             Button(
-                data.on(
-                    "click",
-                    "$theme = $theme === 'light' ? 'dark' : 'light'",
-                ),
+                data.on("click", "$light_mode = !$light_mode"),
                 {
                     "class": "text-xs text-zinc-500 hover:text-zinc-200 transition-colors "
                     "cursor-pointer px-3 py-1 rounded border border-zinc-700 hover:border-zinc-500"
@@ -468,7 +465,8 @@ def _markdown_cell_view(cell: Cell):
             {
                 "id": f"md-display-{cell.id}",
                 "class": "prose prose-invert prose-sm max-w-none p-4 rounded-lg "
-                "border border-zinc-800 hover:border-zinc-600 transition-colors cursor-text",
+                "border border-zinc-800 hover:border-zinc-600 transition-colors cursor-text "
+                "ml-[4.5rem]",
             },
             data.on(
                 "dblclick",
@@ -482,7 +480,7 @@ def _markdown_cell_view(cell: Cell):
         Div(
             {
                 "id": f"md-edit-{cell.id}",
-                "class": "hidden",
+                "class": "hidden ml-[4.5rem]",
             },
             Textarea(
                 cell.input,
@@ -590,7 +588,10 @@ def page(
             ),
             Script(SafeString(
                 "(function(){var t=localStorage.getItem('nb-theme');"
-                "if(t==='light')document.documentElement.classList.add('light-mode');})()"
+                "if(t==='light'){document.documentElement.classList.add('light-mode');"
+                "document.addEventListener('DOMContentLoaded',function(){"
+                "var b=document.body;if(b){var s=JSON.parse(b.getAttribute('data-signals')||'{}');"
+                "s.light_mode=true;b.setAttribute('data-signals',JSON.stringify(s));}});}})()"
             )),
         ),
         Body(
@@ -606,21 +607,28 @@ def page(
                     "focus_cell": "",
                     "kernel_state": "idle",
                     "show_vars": False,
-                    "theme": "dark",
+                    "light_mode": False,
                 }
             ),
             data.init(at.get("/events", retry_interval_ms=2000, retry_max_count=0)),
-            data.effect("document.body.dataset.notebookId=String($notebook_id)"),
-            data.effect(
-                "var t=localStorage.getItem('nb-theme');"
-                "if(t&&t!==$theme){$theme=t;}"
-                "document.documentElement.classList.toggle('light-mode',$theme==='light');"
-                "localStorage.setItem('nb-theme',$theme)"
+            Span(
+                data.effect("document.body.dataset.notebookId=String($notebook_id)"),
+                {"style": "display:none"},
             ),
-            data.effect(
-                "if($focus_cell){"
-                "var el=document.querySelector('textarea[data-cell-id=\"'+$focus_cell+'\"]');"
-                "if(el){el.focus();}$focus_cell='';}"
+            Span(
+                data.effect(
+                    "document.documentElement.classList.toggle('light-mode',$light_mode);"
+                    "localStorage.setItem('nb-theme',$light_mode?'light':'dark')"
+                ),
+                {"style": "display:none"},
+            ),
+            Span(
+                data.effect(
+                    "if($focus_cell){"
+                    "var el=document.querySelector('textarea[data-cell-id=\"'+$focus_cell+'\"]');"
+                    "if(el){el.focus();}$focus_cell='';}"
+                ),
+                {"style": "display:none"},
             ),
             header_bar(),
             Div(

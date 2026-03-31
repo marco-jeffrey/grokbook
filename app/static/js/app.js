@@ -426,10 +426,8 @@
     }
   });
 
-  // ── variables panel polling ────────────────────────────────────────────
-  setInterval(async function () {
-    var panel = document.getElementById('vars-panel');
-    if (!panel || panel.style.display === 'none' || panel.offsetParent === null) return;
+  // ── variables panel ─────────────────────────────────────────────────────
+  async function fetchVariables() {
     var id = nbId();
     if (!id) return;
     try {
@@ -459,5 +457,26 @@
       html += '</tbody></table>';
       content.innerHTML = html;
     } catch (_) {}
+  }
+
+  function isVarsPanelVisible() {
+    var panel = document.getElementById('vars-panel');
+    if (!panel) return false;
+    // offsetParent is null for position:fixed elements, so use computed display
+    return getComputedStyle(panel).display !== 'none';
+  }
+
+  // Immediate fetch when panel becomes visible
+  var _varsWasVisible = false;
+  new MutationObserver(function () {
+    var visible = isVarsPanelVisible();
+    if (visible && !_varsWasVisible) fetchVariables();
+    _varsWasVisible = visible;
+  }).observe(document.body, { attributes: true, subtree: true });
+
+  // Continue polling every 5s while visible
+  setInterval(function () {
+    if (!isVarsPanelVisible()) return;
+    fetchVariables();
   }, 5000);
 })();

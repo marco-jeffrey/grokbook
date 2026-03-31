@@ -53,31 +53,42 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
 
         # Loop: wait for relay events, re-patch. Heartbeat every 15s
         # to prevent proxies/browsers from closing idle connections.
+        # IMPORTANT: We use asyncio.wait (not wait_for) so the pending
+        # __anext__ task is NOT cancelled on timeout — cancelling it would
+        # kill the async generator and destroy the relay subscription.
         sub = relay.subscribe("notebook.*")
         sub_iter = sub.__aiter__()
+        pending_next: asyncio.Task | None = None
         alive = w.alive()
         async with alive:
-            while True:
-                try:
-                    subject, payload = await asyncio.wait_for(
-                        sub_iter.__anext__(), timeout=15
-                    )
-                except TimeoutError:
-                    # Send SSE comment as heartbeat
-                    w.write(b": heartbeat\n\n")
-                    continue
-                except (StopAsyncIteration, asyncio.CancelledError):
-                    break
+            try:
+                while True:
+                    if pending_next is None:
+                        pending_next = asyncio.create_task(sub_iter.__anext__())
+                    done, _ = await asyncio.wait({pending_next}, timeout=15)
+                    if not done:
+                        # Timeout — send heartbeat, reuse the same pending task
+                        w.write(b": heartbeat\n\n")
+                        continue
+                    try:
+                        subject, payload = pending_next.result()
+                    except StopAsyncIteration:
+                        break
+                    pending_next = None
 
-                parts = subject.split(".")
-                event_nb_id = int(parts[1]) if len(parts) >= 2 else 0
+                    parts = subject.split(".")
+                    event_nb_id = int(parts[1]) if len(parts) >= 2 else 0
 
-                notebooks = await db.get_all_notebooks()
-                w.patch(element=sidebar_view(nb_id, notebooks), selector="#sidebar")
+                    notebooks = await db.get_all_notebooks()
+                    w.patch(element=sidebar_view(nb_id, notebooks), selector="#sidebar")
 
-                if event_nb_id == nb_id:
-                    cells = await db.get_all_cells(nb_id)
-                    w.patch(element=notebook(cells, nb_id), selector="#notebook")
+                    if event_nb_id == nb_id:
+                        cells = await db.get_all_cells(nb_id)
+                        w.patch(element=notebook(cells, nb_id), selector="#notebook")
+            finally:
+                if pending_next is not None:
+                    pending_next.cancel()
+                await sub_iter.aclose()
 
     # ── notebook switching ────────────────────────────────────────────────
 
@@ -262,6 +273,8 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         if nb_id:
             relay.publish(f"notebook.{nb_id}.cell_updated", "cell")
 
+    # ── firePost-targeted handlers (return JSON, relay pushes UI update) ──
+
     async def add_cell_above(c: Context, w: Writer) -> None:
         try:
             ref_id = int(c.req.tail)
@@ -273,8 +286,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             w.text("Not Found", 404)
             return
         new_id = await db.insert_cell_at(nb_id, ref_id, "above")
-        await _patch_notebook(w, nb_id)
-        w.sync({"focus_cell": str(new_id)})
+        w.json({"id": new_id})
         relay.publish(f"notebook.{nb_id}.cell_created", "cell")
 
     async def add_cell_below(c: Context, w: Writer) -> None:
@@ -288,8 +300,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             w.text("Not Found", 404)
             return
         new_id = await db.insert_cell_at(nb_id, ref_id, "below")
-        await _patch_notebook(w, nb_id)
-        w.sync({"focus_cell": str(new_id)})
+        w.json({"id": new_id})
         relay.publish(f"notebook.{nb_id}.cell_created", "cell")
 
     async def convert_cell(c: Context, w: Writer) -> None:
@@ -304,9 +315,8 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             return
         new_type = "markdown" if cell.cell_type == "code" else "code"
         await db.update_cell_type(cell_id, new_type)
-        nb_id = cell.notebook_id
-        await _patch_notebook(w, nb_id)
-        relay.publish(f"notebook.{nb_id}.cell_updated", "cell")
+        w.json({"ok": True})
+        relay.publish(f"notebook.{cell.notebook_id}.cell_updated", "cell")
 
     async def delete_cell(c: Context, w: Writer) -> None:
         try:
@@ -319,7 +329,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             w.text("Not Found", 404)
             return
         await db.delete_cell(cell_id)
-        await _patch_notebook(w, nb_id)
+        w.json({"ok": True})
         relay.publish(f"notebook.{nb_id}.cell_deleted", "cell")
 
     async def move_cell_up(c: Context, w: Writer) -> None:
@@ -333,7 +343,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             w.text("Not Found", 404)
             return
         await db.move_cell(cell_id, "up")
-        await _patch_notebook(w, nb_id)
+        w.json({"ok": True})
         relay.publish(f"notebook.{nb_id}.cell_moved", "cell")
 
     async def move_cell_down(c: Context, w: Writer) -> None:
@@ -347,7 +357,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             w.text("Not Found", 404)
             return
         await db.move_cell(cell_id, "down")
-        await _patch_notebook(w, nb_id)
+        w.json({"ok": True})
         relay.publish(f"notebook.{nb_id}.cell_moved", "cell")
 
     async def duplicate_cell(c: Context, w: Writer) -> None:
@@ -361,14 +371,14 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             w.text("Not Found", 404)
             return
         await db.duplicate_cell(cell_id)
-        await _patch_notebook(w, nb_id)
+        w.json({"ok": True})
         relay.publish(f"notebook.{nb_id}.cell_duplicated", "cell")
 
     # ── kernel ────────────────────────────────────────────────────────────
 
     async def kernel_variables(c: Context, w: Writer) -> None:
-        signals = await get_signals(c.req)
-        nb_id = int(signals.get("notebook_id", 0))
+        body = await c.req.json()
+        nb_id = int(body.get("notebook_id", 0))
         if not nb_id:
             w.json({"variables": []})
             return
