@@ -289,6 +289,47 @@ class Database:
             r = await cur.fetchone()
         return r["id"] if r else None
 
+    async def insert_cell_at(
+        self, notebook_id: int, reference_cell_id: int, position: str, cell_type: str = "code"
+    ) -> int:
+        """Insert a cell above or below a reference cell. position: 'above' or 'below'."""
+        async with self._conn.execute(
+            "SELECT order_index FROM cells WHERE id = ?", (reference_cell_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        if not row:
+            return await self.insert_cell(notebook_id, cell_type=cell_type)
+        ref_order = row["order_index"]
+        if position == "above":
+            # Shift all cells at or above ref_order up by 1
+            await self._conn.execute(
+                "UPDATE cells SET order_index = order_index + 1 "
+                "WHERE notebook_id = ? AND order_index >= ?",
+                (notebook_id, ref_order),
+            )
+            new_order = ref_order
+        else:
+            # Shift all cells below ref_order up by 1
+            await self._conn.execute(
+                "UPDATE cells SET order_index = order_index + 1 "
+                "WHERE notebook_id = ? AND order_index > ?",
+                (notebook_id, ref_order),
+            )
+            new_order = ref_order + 1
+        cur = await self._conn.execute(
+            "INSERT INTO cells (notebook_id, order_index, cell_type) VALUES (?, ?, ?)",
+            (notebook_id, new_order, cell_type),
+        )
+        await self._conn.commit()
+        return cur.lastrowid
+
+    async def update_cell_type(self, cell_id: int, cell_type: str) -> None:
+        """Change a cell's type (code/markdown)."""
+        await self._conn.execute(
+            "UPDATE cells SET cell_type = ? WHERE id = ?", (cell_type, cell_id)
+        )
+        await self._conn.commit()
+
     async def move_cell(self, cell_id: int, direction: str) -> None:
         """Swap cell with adjacent cell. direction: 'up' or 'down'."""
         async with self._conn.execute(

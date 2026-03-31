@@ -14,11 +14,11 @@
 - [x] Commit
 
 ## Feature 3: Keyboard Shortcuts (Jupyter-style)
-- [ ] db.py — insert_cell_at, update_cell_type
-- [ ] handlers.py — new-above/below, convert endpoints
-- [ ] views.py — data-cell-container attrs, selected-cell visual
-- [ ] app.js — command/edit mode state machine
-- [ ] Commit
+- [x] db.py — insert_cell_at, update_cell_type
+- [x] handlers.py — new-above/below, convert endpoints
+- [x] views.py — data-cell-container attrs, selected-cell visual
+- [x] app.js — command/edit mode state machine
+- [x] Commit
 
 ## Feature 4: Streaming Kernel Output
 - [ ] kernel.py — execute_streaming() async generator

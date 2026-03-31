@@ -235,6 +235,52 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         if nb_id:
             relay.publish(f"notebook.{nb_id}.cell_updated", "cell")
 
+    async def add_cell_above(c: Context, w: Writer) -> None:
+        try:
+            ref_id = int(c.req.tail)
+        except ValueError:
+            w.text("Not Found", 404)
+            return
+        nb_id = await db.get_cell_notebook_id(ref_id)
+        if not nb_id:
+            w.text("Not Found", 404)
+            return
+        new_id = await db.insert_cell_at(nb_id, ref_id, "above")
+        await _patch_notebook(w, nb_id)
+        w.sync({"focus_cell": str(new_id)})
+        relay.publish(f"notebook.{nb_id}.cell_created", "cell")
+
+    async def add_cell_below(c: Context, w: Writer) -> None:
+        try:
+            ref_id = int(c.req.tail)
+        except ValueError:
+            w.text("Not Found", 404)
+            return
+        nb_id = await db.get_cell_notebook_id(ref_id)
+        if not nb_id:
+            w.text("Not Found", 404)
+            return
+        new_id = await db.insert_cell_at(nb_id, ref_id, "below")
+        await _patch_notebook(w, nb_id)
+        w.sync({"focus_cell": str(new_id)})
+        relay.publish(f"notebook.{nb_id}.cell_created", "cell")
+
+    async def convert_cell(c: Context, w: Writer) -> None:
+        try:
+            cell_id = int(c.req.tail)
+        except ValueError:
+            w.text("Not Found", 404)
+            return
+        cell = await db.get_cell(cell_id)
+        if not cell:
+            w.text("Not Found", 404)
+            return
+        new_type = "markdown" if cell.cell_type == "code" else "code"
+        await db.update_cell_type(cell_id, new_type)
+        nb_id = cell.notebook_id
+        await _patch_notebook(w, nb_id)
+        relay.publish(f"notebook.{nb_id}.cell_updated", "cell")
+
     async def delete_cell(c: Context, w: Writer) -> None:
         try:
             cell_id = int(c.req.tail)
@@ -344,6 +390,9 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router.post("/cells/move-up/*", move_cell_up)
     router.post("/cells/move-down/*", move_cell_down)
     router.post("/cells/duplicate/*", duplicate_cell)
+    router.post("/cells/new-above/*", add_cell_above)
+    router.post("/cells/new-below/*", add_cell_below)
+    router.post("/cells/convert/*", convert_cell)
     router.post("/kernel/restart", kernel_restart)
     router.post("/complete", complete_handler)
     router.post("/inspect", inspect_handler)

@@ -311,7 +311,7 @@ def _code_cell_view(cell: Cell):
     is_error = cell.status == "error"
     sig = f"cell_{cell.id}"
     return Div(
-        {"class": "mb-6 group"},
+        {"class": "mb-6 group", "data-cell-container": str(cell.id)},
         _cell_toolbar(cell),
         data.signals({sig: cell.input}),
         Div(
@@ -366,7 +366,7 @@ def _markdown_cell_view(cell: Cell):
     sig = f"cell_{cell.id}"
     rendered = _md.render(cell.input) if cell.input else "<p class='text-zinc-600 italic'>empty markdown cell</p>"
     return Div(
-        {"class": "mb-6 group"},
+        {"class": "mb-6 group", "data-cell-container": str(cell.id)},
         _cell_toolbar(cell),
         data.signals({sig: cell.input}),
         # Rendered markdown (click to edit)
