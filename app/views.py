@@ -24,6 +24,7 @@ from stario.html import (
 
 from stario import UrlFor
 
+from app.ansi import ansi_to_html
 from app.state import Cell, Notebook
 
 _md = MarkdownIt("gfm-like")
@@ -361,7 +362,7 @@ def _render_output_block(block: dict):
     # text/plain fallback
     return Pre(
         {"class": "font-mono text-sm whitespace-pre-wrap break-words"},
-        SafeString(_e.escape(content)),
+        SafeString(ansi_to_html(content)),
     )
 
 
@@ -377,7 +378,7 @@ def _collapsible_text(output: str, base_class: str, id_attr: dict):
         return Pre(
             id_attr,
             {"class": base_class + " font-mono text-sm whitespace-pre-wrap break-words"},
-            SafeString(_e.escape(output)),
+            SafeString(ansi_to_html(output)),
         )
 
     preview = "\n".join(lines[:_COLLAPSE_PREVIEW])
@@ -393,7 +394,7 @@ def _collapsible_text(output: str, base_class: str, id_attr: dict):
             data.show(f"${sig}"),
             Pre(
                 {"class": base_class + " font-mono text-sm whitespace-pre-wrap break-words"},
-                SafeString(_e.escape(preview)),
+                SafeString(ansi_to_html(preview)),
             ),
             Button(
                 data.on("click", f"${sig} = false"),
@@ -406,7 +407,7 @@ def _collapsible_text(output: str, base_class: str, id_attr: dict):
             data.show(f"!${sig}"),
             Pre(
                 {"class": base_class + " font-mono text-sm whitespace-pre-wrap break-words"},
-                SafeString(_e.escape(output)),
+                SafeString(ansi_to_html(output)),
             ),
             Button(
                 data.on("click", f"${sig} = true"),

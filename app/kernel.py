@@ -76,7 +76,7 @@ class KernelManager:
                 elif t == "error":
                     is_error = True
                     tb = msg["content"]["traceback"]
-                    blocks.append({"mime": "text/plain", "data": "\n".join(_ANSI.sub("", line) for line in tb)})
+                    blocks.append({"mime": "text/plain", "data": "\n".join(tb)})
                 elif t == "execute_input":
                     exec_count = msg["content"].get("execution_count", exec_count)
                 elif t == "status" and msg["content"]["execution_state"] == "idle":
@@ -125,7 +125,7 @@ class KernelManager:
                 elif t == "error":
                     is_error = True
                     tb = msg["content"]["traceback"]
-                    blocks.append({"mime": "text/plain", "data": "\n".join(_ANSI.sub("", line) for line in tb)})
+                    blocks.append({"mime": "text/plain", "data": "\n".join(tb)})
                     yield self._blocks_to_output(blocks, has_rich), is_error, True, exec_count
                     return
                 elif t == "execute_input":
