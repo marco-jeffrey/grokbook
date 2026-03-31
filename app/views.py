@@ -292,11 +292,27 @@ def _render_output(output: str, is_error: bool):
     return Pre({"class": base_class + " font-mono text-sm whitespace-pre-wrap break-words"}, SafeString(_e.escape(output)))
 
 
+def _cell_toolbar(cell: Cell):
+    """Row of small action buttons that appear on hover."""
+    btn = (
+        "px-1.5 py-0.5 rounded text-zinc-600 hover:text-zinc-200 "
+        "hover:bg-zinc-700 transition-colors cursor-pointer text-xs"
+    )
+    return Div(
+        {"class": "opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 mb-1 justify-end"},
+        Button(data.on("click", at.post(f"/cells/move-up/{cell.id}")), {"class": btn, "title": "Move up"}, "▲"),
+        Button(data.on("click", at.post(f"/cells/move-down/{cell.id}")), {"class": btn, "title": "Move down"}, "▼"),
+        Button(data.on("click", at.post(f"/cells/duplicate/{cell.id}")), {"class": btn, "title": "Duplicate"}, "⊕"),
+        Button(data.on("click", at.post(f"/cells/delete/{cell.id}")), {"class": btn + " hover:text-red-400", "title": "Delete"}, "✕"),
+    )
+
+
 def _code_cell_view(cell: Cell):
     is_error = cell.status == "error"
     sig = f"cell_{cell.id}"
     return Div(
-        {"class": "mb-6"},
+        {"class": "mb-6 group"},
+        _cell_toolbar(cell),
         data.signals({sig: cell.input}),
         Div(
             {"class": "relative"},
@@ -351,6 +367,7 @@ def _markdown_cell_view(cell: Cell):
     rendered = _md.render(cell.input) if cell.input else "<p class='text-zinc-600 italic'>empty markdown cell</p>"
     return Div(
         {"class": "mb-6 group"},
+        _cell_toolbar(cell),
         data.signals({sig: cell.input}),
         # Rendered markdown (click to edit)
         Div(

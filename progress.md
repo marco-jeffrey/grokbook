@@ -6,12 +6,12 @@
 - [x] Commit
 
 ## Feature 2: Cell Operations (Delete, Move, Duplicate)
-- [ ] db.py — move_cell, duplicate_cell
-- [ ] handlers.py — delete/move/duplicate endpoints
-- [ ] api.py — REST endpoints
-- [ ] mcp_server.py — tools
-- [ ] views.py — cell toolbar
-- [ ] Commit
+- [x] db.py — move_cell, duplicate_cell
+- [x] handlers.py — delete/move/duplicate endpoints
+- [x] api.py — REST endpoints
+- [x] mcp_server.py — tools
+- [x] views.py — cell toolbar
+- [x] Commit
 
 ## Feature 3: Keyboard Shortcuts (Jupyter-style)
 - [ ] db.py — insert_cell_at, update_cell_type

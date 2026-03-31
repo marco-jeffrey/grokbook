@@ -1,5 +1,6 @@
 import asyncio
 
+from stario import Relay
 from stario.datastar.signals import get_signals
 from stario.http import Router
 from stario.http.types import Context, Writer
@@ -9,7 +10,7 @@ from app.kernel import KernelPool
 from app.views import notebook, page, sidebar_view
 
 
-def app_router(db: Database, pool: KernelPool) -> Router:
+def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router = Router()
 
     # ── pages ─────────────────────────────────────────────────────────────
@@ -32,7 +33,35 @@ def app_router(db: Database, pool: KernelPool) -> Router:
             return
         notebooks = await db.get_all_notebooks()
         cells = await db.get_all_cells(nb_id)
-        w.html(page(nb, notebooks, cells))
+        w.html(page(nb, notebooks, cells, c.url_for))
+
+    # ── SSE live-push ───────────────────────────────────────────────────
+
+    async def events(c: Context, w: Writer) -> None:
+        """SSE endpoint — browser connects on page load for live updates."""
+        signals = await get_signals(c.req)
+        nb_id = int(signals.get("notebook_id", 0))
+        if not nb_id:
+            w.empty(204)
+            return
+
+        # Send initial state
+        notebooks = await db.get_all_notebooks()
+        cells = await db.get_all_cells(nb_id)
+        w.patch(element=notebook(cells, nb_id), selector="#notebook")
+        w.patch(element=sidebar_view(nb_id, notebooks), selector="#sidebar")
+
+        # Loop: wait for relay events, re-patch
+        async for subject, payload in w.alive(relay.subscribe("notebook.*")):
+            parts = subject.split(".")
+            event_nb_id = int(parts[1]) if len(parts) >= 2 else 0
+
+            notebooks = await db.get_all_notebooks()
+            w.patch(element=sidebar_view(nb_id, notebooks), selector="#sidebar")
+
+            if event_nb_id == nb_id:
+                cells = await db.get_all_cells(nb_id)
+                w.patch(element=notebook(cells, nb_id), selector="#notebook")
 
     # ── notebook switching ────────────────────────────────────────────────
 
@@ -59,6 +88,7 @@ def app_router(db: Database, pool: KernelPool) -> Router:
     async def new_notebook(c: Context, w: Writer) -> None:
         nb_id = await db.create_notebook()
         await _patch_all(w, nb_id)
+        relay.publish(f"notebook.{nb_id}.created", "notebook")
 
     async def _patch_sidebar(w: Writer, active_id: int, **kwargs) -> None:
         notebooks = await db.get_all_notebooks()
@@ -93,11 +123,13 @@ def app_router(db: Database, pool: KernelPool) -> Router:
             await db.rename_notebook(nb_id, name)
         active_id = int(signals.get("notebook_id", 0))
         await _patch_sidebar(w, active_id)
+        relay.publish(f"notebook.{nb_id}.updated", "notebook")
 
     async def nb_duplicate(c: Context, w: Writer) -> None:
         nb_id = int(c.req.tail)
         new_id = await db.duplicate_notebook(nb_id)
         await _patch_all(w, new_id)
+        relay.publish(f"notebook.{new_id}.created", "notebook")
 
     async def nb_delete(c: Context, w: Writer) -> None:
         nb_id = int(c.req.tail)
@@ -111,6 +143,7 @@ def app_router(db: Database, pool: KernelPool) -> Router:
             await _patch_all(w, fallback)
         else:
             await _patch_sidebar(w, active_id)
+        relay.publish(f"notebook.{nb_id}.deleted", "notebook")
 
     # ── cells ─────────────────────────────────────────────────────────────
 
@@ -124,12 +157,14 @@ def app_router(db: Database, pool: KernelPool) -> Router:
         new_id = await db.insert_cell(nb_id, cell_type="code")
         await _patch_notebook(w, nb_id)
         w.sync({"focus_cell": str(new_id)})
+        relay.publish(f"notebook.{nb_id}.cell_created", "cell")
 
     async def add_md_cell(c: Context, w: Writer) -> None:
         signals = await get_signals(c.req)
         nb_id = int(signals.get("notebook_id", 0))
         await db.insert_cell(nb_id, cell_type="markdown")
         await _patch_notebook(w, nb_id)
+        relay.publish(f"notebook.{nb_id}.cell_created", "cell")
 
     async def save_md_cell(c: Context, w: Writer) -> None:
         """Save markdown cell content and re-render notebook."""
@@ -144,6 +179,7 @@ def app_router(db: Database, pool: KernelPool) -> Router:
         nb_id = await db.get_cell_notebook_id(cell_id)
         if nb_id:
             await _patch_notebook(w, nb_id)
+            relay.publish(f"notebook.{nb_id}.cell_updated", "cell")
 
     async def _run_and_save(cell_id: int, nb_id: int, code: str) -> str:
         """Execute code and write result to DB. Always runs to completion."""
@@ -183,6 +219,7 @@ def app_router(db: Database, pool: KernelPool) -> Router:
                 "focus_cell": str(next_id) if next_id else "",
             }
         )
+        relay.publish(f"notebook.{nb_id}.cell_executed", "cell")
 
     async def save_cell(c: Context, w: Writer) -> None:
         try:
@@ -194,6 +231,65 @@ def app_router(db: Database, pool: KernelPool) -> Router:
         code = body.get(f"cell_{cell_id}", "")
         await db.update_input(cell_id, code)
         w.empty(204)
+        nb_id = await db.get_cell_notebook_id(cell_id)
+        if nb_id:
+            relay.publish(f"notebook.{nb_id}.cell_updated", "cell")
+
+    async def delete_cell(c: Context, w: Writer) -> None:
+        try:
+            cell_id = int(c.req.tail)
+        except ValueError:
+            w.text("Not Found", 404)
+            return
+        nb_id = await db.get_cell_notebook_id(cell_id)
+        if not nb_id:
+            w.text("Not Found", 404)
+            return
+        await db.delete_cell(cell_id)
+        await _patch_notebook(w, nb_id)
+        relay.publish(f"notebook.{nb_id}.cell_deleted", "cell")
+
+    async def move_cell_up(c: Context, w: Writer) -> None:
+        try:
+            cell_id = int(c.req.tail)
+        except ValueError:
+            w.text("Not Found", 404)
+            return
+        nb_id = await db.get_cell_notebook_id(cell_id)
+        if not nb_id:
+            w.text("Not Found", 404)
+            return
+        await db.move_cell(cell_id, "up")
+        await _patch_notebook(w, nb_id)
+        relay.publish(f"notebook.{nb_id}.cell_moved", "cell")
+
+    async def move_cell_down(c: Context, w: Writer) -> None:
+        try:
+            cell_id = int(c.req.tail)
+        except ValueError:
+            w.text("Not Found", 404)
+            return
+        nb_id = await db.get_cell_notebook_id(cell_id)
+        if not nb_id:
+            w.text("Not Found", 404)
+            return
+        await db.move_cell(cell_id, "down")
+        await _patch_notebook(w, nb_id)
+        relay.publish(f"notebook.{nb_id}.cell_moved", "cell")
+
+    async def duplicate_cell(c: Context, w: Writer) -> None:
+        try:
+            cell_id = int(c.req.tail)
+        except ValueError:
+            w.text("Not Found", 404)
+            return
+        nb_id = await db.get_cell_notebook_id(cell_id)
+        if not nb_id:
+            w.text("Not Found", 404)
+            return
+        await db.duplicate_cell(cell_id)
+        await _patch_notebook(w, nb_id)
+        relay.publish(f"notebook.{nb_id}.cell_duplicated", "cell")
 
     # ── kernel ────────────────────────────────────────────────────────────
 
@@ -202,6 +298,7 @@ def app_router(db: Database, pool: KernelPool) -> Router:
         nb_id = int(signals.get("notebook_id", 0))
         await pool.restart(nb_id)
         w.sync({"kernel_state": "idle"})
+        relay.publish(f"notebook.{nb_id}.kernel_restarted", "kernel")
 
     # ── autocomplete / inspect ────────────────────────────────────────────
 
@@ -228,6 +325,7 @@ def app_router(db: Database, pool: KernelPool) -> Router:
     # ── routes ────────────────────────────────────────────────────────────
 
     router.get("/", index)
+    router.get("/events", events)
     router.get("/nb/*", nb_page)
     router.post("/nb/new", new_notebook)
     router.post("/nb/switch/*", switch_notebook)
@@ -242,6 +340,10 @@ def app_router(db: Database, pool: KernelPool) -> Router:
     router.post("/cells/save-md/*", save_md_cell)
     router.post("/cells/execute/*", execute_cell)
     router.post("/cells/save/*", save_cell)
+    router.post("/cells/delete/*", delete_cell)
+    router.post("/cells/move-up/*", move_cell_up)
+    router.post("/cells/move-down/*", move_cell_down)
+    router.post("/cells/duplicate/*", duplicate_cell)
     router.post("/kernel/restart", kernel_restart)
     router.post("/complete", complete_handler)
     router.post("/inspect", inspect_handler)

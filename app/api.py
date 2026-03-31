@@ -1,32 +1,45 @@
 import asyncio
 
+from stario import Relay
 from stario.http import Router
 from stario.http.types import Context, Writer
 
 from app.db import Database
 from app.kernel import KernelPool
+from app.state import Cell, Notebook
 
 
-def api_router(db: Database, pool: KernelPool) -> Router:
+def _serialize_cell(cell: Cell) -> dict:
+    return {
+        "id": cell.id,
+        "notebook_id": cell.notebook_id,
+        "cell_type": cell.cell_type,
+        "input": cell.input,
+        "output": cell.output,
+        "status": cell.status,
+    }
+
+
+def _serialize_notebook(nb: Notebook) -> dict:
+    return {"id": nb.id, "name": nb.name, "updated_at": nb.updated_at}
+
+
+def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router = Router()
 
     # ── notebooks ─────────────────────────────────────────────────────────
 
     async def list_notebooks(c: Context, w: Writer) -> None:
         notebooks = await db.get_all_notebooks()
-        w.json(
-            [
-                {"id": n.id, "name": n.name, "updated_at": n.updated_at}
-                for n in notebooks
-            ]
-        )
+        w.json([_serialize_notebook(n) for n in notebooks])
 
     async def create_notebook(c: Context, w: Writer) -> None:
         body = await c.req.json()
         name = body.get("name", "Untitled")
         nb_id = await db.create_notebook(name)
         nb = await db.get_notebook(nb_id)
-        w.json({"id": nb.id, "name": nb.name, "updated_at": nb.updated_at}, 201)
+        w.json(_serialize_notebook(nb), 201)
+        relay.publish(f"notebook.{nb_id}.created", "notebook")
 
     async def get_notebook(c: Context, w: Writer) -> None:
         try:
@@ -41,19 +54,8 @@ def api_router(db: Database, pool: KernelPool) -> Router:
         cells = await db.get_all_cells(nb_id)
         w.json(
             {
-                "id": nb.id,
-                "name": nb.name,
-                "updated_at": nb.updated_at,
-                "cells": [
-                    {
-                        "id": cell.id,
-                        "cell_type": cell.cell_type,
-                        "input": cell.input,
-                        "output": cell.output,
-                        "status": cell.status,
-                    }
-                    for cell in cells
-                ],
+                **_serialize_notebook(nb),
+                "cells": [_serialize_cell(cell) for cell in cells],
             }
         )
 
@@ -71,7 +73,30 @@ def api_router(db: Database, pool: KernelPool) -> Router:
         if not nb:
             w.json({"error": "not found"}, 404)
             return
-        w.json({"id": nb.id, "name": nb.name, "updated_at": nb.updated_at})
+        w.json(_serialize_notebook(nb))
+        relay.publish(f"notebook.{nb_id}.updated", "notebook")
+
+    async def duplicate_notebook(c: Context, w: Writer) -> None:
+        try:
+            nb_id = int(c.req.tail)
+        except ValueError:
+            w.json({"error": "invalid notebook id"}, 400)
+            return
+        nb = await db.get_notebook(nb_id)
+        if not nb:
+            w.json({"error": "not found"}, 404)
+            return
+        new_id = await db.duplicate_notebook(nb_id)
+        new_nb = await db.get_notebook(new_id)
+        cells = await db.get_all_cells(new_id)
+        w.json(
+            {
+                **_serialize_notebook(new_nb),
+                "cells": [_serialize_cell(cell) for cell in cells],
+            },
+            201,
+        )
+        relay.publish(f"notebook.{new_id}.created", "notebook")
 
     async def delete_notebook(c: Context, w: Writer) -> None:
         try:
@@ -79,6 +104,7 @@ def api_router(db: Database, pool: KernelPool) -> Router:
         except ValueError:
             w.json({"error": "invalid notebook id"}, 400)
             return
+        relay.publish(f"notebook.{nb_id}.deleted", "notebook")
         await db.delete_notebook(nb_id)
         w.empty(204)
 
@@ -96,17 +122,8 @@ def api_router(db: Database, pool: KernelPool) -> Router:
         if code:
             await db.update_input(cell_id, code)
         cell = await db.get_cell(cell_id)
-        w.json(
-            {
-                "id": cell.id,
-                "notebook_id": cell.notebook_id,
-                "cell_type": cell.cell_type,
-                "input": cell.input,
-                "output": cell.output,
-                "status": cell.status,
-            },
-            201,
-        )
+        w.json(_serialize_cell(cell), 201)
+        relay.publish(f"notebook.{nb_id}.cell_created", "cell")
 
     async def get_cell(c: Context, w: Writer) -> None:
         try:
@@ -118,16 +135,7 @@ def api_router(db: Database, pool: KernelPool) -> Router:
         if not cell:
             w.json({"error": "not found"}, 404)
             return
-        w.json(
-            {
-                "id": cell.id,
-                "notebook_id": cell.notebook_id,
-                "cell_type": cell.cell_type,
-                "input": cell.input,
-                "output": cell.output,
-                "status": cell.status,
-            }
-        )
+        w.json(_serialize_cell(cell))
 
     async def update_cell(c: Context, w: Writer) -> None:
         try:
@@ -144,16 +152,38 @@ def api_router(db: Database, pool: KernelPool) -> Router:
         if code is not None:
             await db.update_input(cell_id, code)
         cell = await db.get_cell(cell_id)
-        w.json(
-            {
-                "id": cell.id,
-                "notebook_id": cell.notebook_id,
-                "cell_type": cell.cell_type,
-                "input": cell.input,
-                "output": cell.output,
-                "status": cell.status,
-            }
-        )
+        w.json(_serialize_cell(cell))
+        relay.publish(f"notebook.{cell.notebook_id}.cell_updated", "cell")
+
+    async def move_cell(c: Context, w: Writer) -> None:
+        try:
+            cell_id = int(c.req.tail)
+        except ValueError:
+            w.json({"error": "invalid cell id"}, 400)
+            return
+        body = await c.req.json()
+        direction = body.get("direction", "down")
+        await db.move_cell(cell_id, direction)
+        cell = await db.get_cell(cell_id)
+        if not cell:
+            w.json({"error": "not found"}, 404)
+            return
+        w.json(_serialize_cell(cell))
+        relay.publish(f"notebook.{cell.notebook_id}.cell_moved", "cell")
+
+    async def duplicate_cell_api(c: Context, w: Writer) -> None:
+        try:
+            cell_id = int(c.req.tail)
+        except ValueError:
+            w.json({"error": "invalid cell id"}, 400)
+            return
+        new_id = await db.duplicate_cell(cell_id)
+        if not new_id:
+            w.json({"error": "not found"}, 404)
+            return
+        cell = await db.get_cell(new_id)
+        w.json(_serialize_cell(cell), 201)
+        relay.publish(f"notebook.{cell.notebook_id}.cell_duplicated", "cell")
 
     async def delete_cell(c: Context, w: Writer) -> None:
         try:
@@ -161,8 +191,11 @@ def api_router(db: Database, pool: KernelPool) -> Router:
         except ValueError:
             w.json({"error": "invalid cell id"}, 400)
             return
+        nb_id = await db.get_cell_notebook_id(cell_id)
         await db.delete_cell(cell_id)
         w.empty(204)
+        if nb_id:
+            relay.publish(f"notebook.{nb_id}.cell_deleted", "cell")
 
     async def execute_cell(c: Context, w: Writer) -> None:
         try:
@@ -195,18 +228,13 @@ def api_router(db: Database, pool: KernelPool) -> Router:
 
         task = asyncio.create_task(_run())
         try:
-            output, status = await asyncio.shield(task)
+            await asyncio.shield(task)
         except asyncio.CancelledError:
             return
 
-        w.json(
-            {
-                "id": cell_id,
-                "input": cell.input,
-                "output": output,
-                "status": status,
-            }
-        )
+        cell = await db.get_cell(cell_id)
+        w.json(_serialize_cell(cell))
+        relay.publish(f"notebook.{nb_id}.cell_executed", "cell")
 
     # ── kernel ────────────────────────────────────────────────────────────
 
@@ -227,6 +255,7 @@ def api_router(db: Database, pool: KernelPool) -> Router:
             return
         await pool.restart(nb_id)
         w.json({"state": "idle"})
+        relay.publish(f"notebook.{nb_id}.kernel_restarted", "kernel")
 
     # ── routes ────────────────────────────────────────────────────────────
 
@@ -234,10 +263,13 @@ def api_router(db: Database, pool: KernelPool) -> Router:
     router.post("/notebooks", create_notebook)
     router.get("/notebooks/*", get_notebook)
     router.put("/notebooks/*", update_notebook)
+    router.post("/notebooks/duplicate/*", duplicate_notebook)
     router.delete("/notebooks/*", delete_notebook)
 
     router.post("/cells", create_cell)
     router.post("/cells/execute/*", execute_cell)
+    router.post("/cells/move/*", move_cell)
+    router.post("/cells/duplicate/*", duplicate_cell_api)
     router.get("/cells/*", get_cell)
     router.put("/cells/*", update_cell)
     router.delete("/cells/*", delete_cell)

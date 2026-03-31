@@ -1,6 +1,12 @@
+import logging
+
 import aiosqlite
 
 from app.state import Cell, Notebook
+
+log = logging.getLogger(__name__)
+
+_SCHEMA_VERSION = 2
 
 _CREATE_NOTEBOOKS = """
 CREATE TABLE IF NOT EXISTS notebooks (
@@ -35,6 +41,97 @@ def _row_to_cell(r) -> Cell:
     )
 
 
+async def _get_version(conn: aiosqlite.Connection) -> int:
+    async with conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
+    ) as cur:
+        if not await cur.fetchone():
+            return 0
+    async with conn.execute("SELECT version FROM schema_version") as cur:
+        row = await cur.fetchone()
+    return row["version"] if row else 0
+
+
+async def _set_version(conn: aiosqlite.Connection, version: int) -> None:
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)"
+    )
+    async with conn.execute("SELECT COUNT(*) AS n FROM schema_version") as cur:
+        row = await cur.fetchone()
+    if row["n"] == 0:
+        await conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+    else:
+        await conn.execute("UPDATE schema_version SET version = ?", (version,))
+
+
+async def _migrate_v0_to_v1(conn: aiosqlite.Connection) -> None:
+    """Initial schema: notebooks + cells tables, migrate orphan cells."""
+    log.info("Migration v0→v1: creating base schema")
+    await conn.execute(_CREATE_NOTEBOOKS)
+
+    async with conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='cells'"
+    ) as cur:
+        exists = await cur.fetchone()
+
+    if not exists:
+        await conn.execute(_CREATE_CELLS)
+    else:
+        # Add missing columns to legacy cells table
+        for col, dflt in [
+            ("notebook_id", "0"),
+            ("order_index", "0"),
+            ("status", "''"),
+            ("cell_type", "'code'"),
+        ]:
+            async with conn.execute(
+                "SELECT COUNT(*) AS n FROM pragma_table_info('cells') WHERE name = ?",
+                (col,),
+            ) as cur:
+                row = await cur.fetchone()
+            if row["n"] == 0:
+                log.info("Migration v0→v1: adding column %s to cells", col)
+                await conn.execute(
+                    f"ALTER TABLE cells ADD COLUMN {col} DEFAULT {dflt}"
+                )
+
+        # Migrate orphan cells to a default notebook
+        async with conn.execute(
+            "SELECT COUNT(*) AS n FROM cells WHERE notebook_id = 0 OR notebook_id IS NULL"
+        ) as cur:
+            r = await cur.fetchone()
+        if r["n"] > 0:
+            log.info("Migration v0→v1: adopting %d orphan cells", r["n"])
+            cur = await conn.execute(
+                "INSERT INTO notebooks (name) VALUES ('Untitled')"
+            )
+            nb_id = cur.lastrowid
+            await conn.execute(
+                "UPDATE cells SET notebook_id = ? WHERE notebook_id = 0 OR notebook_id IS NULL",
+                (nb_id,),
+            )
+            async with conn.execute(
+                "SELECT id FROM cells WHERE notebook_id = ? ORDER BY id",
+                (nb_id,),
+            ) as cur2:
+                rows = await cur2.fetchall()
+            for i, row in enumerate(rows):
+                await conn.execute(
+                    "UPDATE cells SET order_index = ? WHERE id = ?", (i, row["id"])
+                )
+
+
+async def _migrate_v1_to_v2(conn: aiosqlite.Connection) -> None:
+    """V2: schema_version tracking (no structural changes, just stamps the version)."""
+    log.info("Migration v1→v2: stamping schema version")
+
+
+_MIGRATIONS = [
+    (0, 1, _migrate_v0_to_v1),
+    (1, 2, _migrate_v1_to_v2),
+]
+
+
 class Database:
     def __init__(self, conn: aiosqlite.Connection) -> None:
         self._conn = conn
@@ -44,54 +141,13 @@ class Database:
         conn = await aiosqlite.connect(path)
         conn.row_factory = aiosqlite.Row
         await conn.execute("PRAGMA foreign_keys = ON")
-        await conn.execute(_CREATE_NOTEBOOKS)
 
-        # Check if cells table exists with old schema
-        async with conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='cells'"
-        ) as cur:
-            exists = await cur.fetchone()
-
-        if not exists:
-            await conn.execute(_CREATE_CELLS)
-        else:
-            # Migrate: add missing columns to existing table
-            for col, dflt in [
-                ("notebook_id", "0"),
-                ("order_index", "0"),
-                ("status", "''"),
-                ("cell_type", "'code'"),
-            ]:
-                try:
-                    await conn.execute(
-                        f"ALTER TABLE cells ADD COLUMN {col} DEFAULT {dflt}"
-                    )
-                except Exception:
-                    pass
-
-            # Migrate orphan cells to a default notebook
-            async with conn.execute(
-                "SELECT COUNT(*) AS n FROM cells WHERE notebook_id = 0 OR notebook_id IS NULL"
-            ) as cur:
-                r = await cur.fetchone()
-            if r["n"] > 0:
-                cur = await conn.execute(
-                    "INSERT INTO notebooks (name) VALUES ('Untitled')"
-                )
-                nb_id = cur.lastrowid
-                await conn.execute(
-                    "UPDATE cells SET notebook_id = ? WHERE notebook_id = 0 OR notebook_id IS NULL",
-                    (nb_id,),
-                )
-                async with conn.execute(
-                    "SELECT id FROM cells WHERE notebook_id = ? ORDER BY id",
-                    (nb_id,),
-                ) as cur2:
-                    rows = await cur2.fetchall()
-                for i, row in enumerate(rows):
-                    await conn.execute(
-                        "UPDATE cells SET order_index = ? WHERE id = ?", (i, row["id"])
-                    )
+        current = await _get_version(conn)
+        for from_v, to_v, migrate_fn in _MIGRATIONS:
+            if current == from_v:
+                await migrate_fn(conn)
+                current = to_v
+        await _set_version(conn, current)
 
         await conn.commit()
         return cls(conn)
@@ -232,6 +288,60 @@ class Database:
         ) as cur:
             r = await cur.fetchone()
         return r["id"] if r else None
+
+    async def move_cell(self, cell_id: int, direction: str) -> None:
+        """Swap cell with adjacent cell. direction: 'up' or 'down'."""
+        async with self._conn.execute(
+            "SELECT notebook_id, order_index FROM cells WHERE id = ?", (cell_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        if not row:
+            return
+        nb_id, cur_order = row["notebook_id"], row["order_index"]
+
+        op = "<" if direction == "up" else ">"
+        sort = "DESC" if direction == "up" else "ASC"
+        async with self._conn.execute(
+            f"SELECT id, order_index FROM cells "
+            f"WHERE notebook_id = ? AND order_index {op} ? ORDER BY order_index {sort} LIMIT 1",
+            (nb_id, cur_order),
+        ) as cur:
+            adj = await cur.fetchone()
+        if not adj:
+            return
+
+        await self._conn.execute(
+            "UPDATE cells SET order_index = ? WHERE id = ?", (adj["order_index"], cell_id)
+        )
+        await self._conn.execute(
+            "UPDATE cells SET order_index = ? WHERE id = ?", (cur_order, adj["id"])
+        )
+        await self._conn.commit()
+
+    async def duplicate_cell(self, cell_id: int) -> int | None:
+        """Duplicate a cell, inserting the copy right below it. Returns new cell ID."""
+        cell = await self.get_cell(cell_id)
+        if not cell:
+            return None
+        async with self._conn.execute(
+            "SELECT order_index FROM cells WHERE id = ?", (cell_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        cur_order = row["order_index"]
+
+        # Shift cells below to make room
+        await self._conn.execute(
+            "UPDATE cells SET order_index = order_index + 1 "
+            "WHERE notebook_id = ? AND order_index > ?",
+            (cell.notebook_id, cur_order),
+        )
+        cur = await self._conn.execute(
+            "INSERT INTO cells (notebook_id, order_index, cell_type, input, output, status) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (cell.notebook_id, cur_order + 1, cell.cell_type, cell.input, cell.output, cell.status),
+        )
+        await self._conn.commit()
+        return cur.lastrowid
 
     async def close(self) -> None:
         await self._conn.close()
