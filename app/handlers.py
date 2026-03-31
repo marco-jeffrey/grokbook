@@ -260,6 +260,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         relay.publish(f"notebook.{nb_id}.cell_executed", "cell")
 
     async def save_cell(c: Context, w: Writer) -> None:
+        """Autosave — silently persists input without triggering UI refresh."""
         try:
             cell_id = int(c.req.tail)
         except ValueError:
@@ -269,9 +270,9 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         code = body.get(f"cell_{cell_id}", "")
         await db.update_input(cell_id, code)
         w.empty(204)
-        nb_id = await db.get_cell_notebook_id(cell_id)
-        if nb_id:
-            relay.publish(f"notebook.{nb_id}.cell_updated", "cell")
+        # NOTE: No relay.publish() here — autosave is a quiet background
+        # operation. Publishing would re-patch the notebook and kick the
+        # user out of markdown edit mode or lose cursor position.
 
     # ── firePost-targeted handlers (return JSON, relay pushes UI update) ──
 
