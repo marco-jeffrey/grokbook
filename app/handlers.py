@@ -379,6 +379,32 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         w.json({"ok": True})
         relay.publish(f"notebook.{nb_id}.cell_duplicated", "cell")
 
+    # ── clear outputs ──────────────────────────────────────────────────
+
+    async def clear_output(c: Context, w: Writer) -> None:
+        try:
+            cell_id = int(c.req.tail)
+        except ValueError:
+            w.text("Not Found", 404)
+            return
+        nb_id = await db.get_cell_notebook_id(cell_id)
+        if not nb_id:
+            w.text("Not Found", 404)
+            return
+        await db.clear_cell_output(cell_id)
+        w.json({"ok": True})
+        relay.publish(f"notebook.{nb_id}.cell_updated", "cell")
+
+    async def clear_all_outputs(c: Context, w: Writer) -> None:
+        signals = await get_signals(c.req)
+        nb_id = int(signals.get("notebook_id", 0))
+        if not nb_id:
+            w.empty(204)
+            return
+        await db.clear_all_outputs(nb_id)
+        await _patch_notebook(w, nb_id)
+        relay.publish(f"notebook.{nb_id}.cell_updated", "cell")
+
     # ── run all ─────────────────────────────────────────────────────────
 
     async def run_all(c: Context, w: Writer) -> None:
@@ -511,6 +537,8 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router.get("/nb/export/*", nb_export)
     router.post("/nb/import", nb_import)
     router.post("/cells/run-all", run_all)
+    router.post("/cells/clear-output/*", clear_output)
+    router.post("/cells/clear-all-outputs", clear_all_outputs)
     router.post("/cells/new", add_cell)
     router.post("/cells/new-md", add_md_cell)
     router.post("/cells/save-md/*", save_md_cell)

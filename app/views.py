@@ -114,6 +114,14 @@ def header_bar():
                 "▶▶ Run All",
             ),
             Button(
+                data.on("click", at.post("/cells/clear-all-outputs", include=["notebook_id"])),
+                {
+                    "class": "text-xs text-zinc-500 hover:text-zinc-200 transition-colors "
+                    "cursor-pointer px-3 py-1 rounded border border-zinc-700 hover:border-zinc-500"
+                },
+                "Clear All",
+            ),
+            Button(
                 data.on("click", at.post("/kernel/interrupt", include=["notebook_id"])),
                 data.show("$executing"),
                 {

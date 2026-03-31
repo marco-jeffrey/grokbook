@@ -267,6 +267,26 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         w.json({"results": results})
         relay.publish(f"notebook.{nb_id}.cell_executed", "cell")
 
+    # ── clear outputs ──────────────────────────────────────────────────
+
+    async def clear_cell_output_api(c: Context, w: Writer) -> None:
+        try:
+            cell_id = int(c.req.tail)
+        except ValueError:
+            w.json({"error": "invalid cell id"}, 400)
+            return
+        await db.clear_cell_output(cell_id)
+        w.json({"ok": True})
+
+    async def clear_all_outputs_api(c: Context, w: Writer) -> None:
+        try:
+            nb_id = int(c.req.tail)
+        except ValueError:
+            w.json({"error": "invalid notebook id"}, 400)
+            return
+        await db.clear_all_outputs(nb_id)
+        w.json({"ok": True})
+
     # ── insert cell at position ───────────────────────────────────────────
 
     async def insert_cell(c: Context, w: Writer) -> None:
@@ -366,6 +386,8 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router.post("/cells", create_cell)
     router.post("/cells/insert", insert_cell)
     router.post("/cells/run-all/*", run_all_cells)
+    router.post("/cells/clear/*", clear_cell_output_api)
+    router.post("/cells/clear-all/*", clear_all_outputs_api)
     router.post("/cells/execute/*", execute_cell)
     router.post("/cells/move/*", move_cell)
     router.post("/cells/duplicate/*", duplicate_cell_api)

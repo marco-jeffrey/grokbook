@@ -415,5 +415,19 @@ class Database:
         await self._conn.commit()
         return cur.lastrowid
 
+    async def clear_cell_output(self, cell_id: int) -> None:
+        await self._conn.execute(
+            "UPDATE cells SET output = '', status = '', execution_time = 0.0 WHERE id = ?",
+            (cell_id,),
+        )
+        await self._conn.commit()
+
+    async def clear_all_outputs(self, notebook_id: int) -> None:
+        await self._conn.execute(
+            "UPDATE cells SET output = '', status = '', execution_time = 0.0 WHERE notebook_id = ? AND cell_type = 'code'",
+            (notebook_id,),
+        )
+        await self._conn.commit()
+
     async def close(self) -> None:
         await self._conn.close()
