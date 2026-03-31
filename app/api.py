@@ -237,6 +237,30 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         w.json(_serialize_cell(cell))
         relay.publish(f"notebook.{nb_id}.cell_executed", "cell")
 
+    # ── run all ─────────────────────────────────────────────────────────
+
+    async def run_all_cells(c: Context, w: Writer) -> None:
+        try:
+            nb_id = int(c.req.tail)
+        except ValueError:
+            w.json({"error": "invalid notebook id"}, 400)
+            return
+        cells = await db.get_all_cells(nb_id)
+        km = await pool.get(nb_id)
+        results = []
+        for cell in cells:
+            if cell.cell_type != "code" or not cell.input.strip():
+                continue
+            output, is_error, exec_count = await km.execute(cell.input)
+            status = "error" if is_error else "ok"
+            await db.update_cell(cell.id, input=cell.input, output=output, status=status, execution_count=exec_count)
+            results.append({"cell_id": cell.id, "status": status})
+            if is_error:
+                break
+        await db.touch_notebook(nb_id)
+        w.json({"results": results})
+        relay.publish(f"notebook.{nb_id}.cell_executed", "cell")
+
     # ── kernel ────────────────────────────────────────────────────────────
 
     async def kernel_status(c: Context, w: Writer) -> None:
@@ -278,6 +302,7 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router.delete("/notebooks/*", delete_notebook)
 
     router.post("/cells", create_cell)
+    router.post("/cells/run-all/*", run_all_cells)
     router.post("/cells/execute/*", execute_cell)
     router.post("/cells/move/*", move_cell)
     router.post("/cells/duplicate/*", duplicate_cell_api)

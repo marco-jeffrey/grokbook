@@ -376,6 +376,39 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         w.json({"ok": True})
         relay.publish(f"notebook.{nb_id}.cell_duplicated", "cell")
 
+    # ── run all ─────────────────────────────────────────────────────────
+
+    async def run_all(c: Context, w: Writer) -> None:
+        signals = await get_signals(c.req)
+        nb_id = int(signals.get("notebook_id", 0))
+        if not nb_id:
+            w.empty(204)
+            return
+        cells = await db.get_all_cells(nb_id)
+        km = await pool.get(nb_id)
+
+        async def _run_all():
+            for cell in cells:
+                if cell.cell_type != "code" or not cell.input.strip():
+                    continue
+                output, is_error, exec_count = await km.execute(cell.input)
+                status = "error" if is_error else "ok"
+                await db.update_cell(cell.id, input=cell.input, output=output, status=status, execution_count=exec_count)
+                # Patch after each cell so user sees progress
+                w.patch(element=_render_output(output, is_error, cell.id), selector=f"#output-{cell.id}")
+                if is_error:
+                    break
+            await db.touch_notebook(nb_id)
+
+        task = asyncio.create_task(_run_all())
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            return
+
+        await _patch_notebook(w, nb_id)
+        relay.publish(f"notebook.{nb_id}.cell_executed", "cell")
+
     # ── kernel ────────────────────────────────────────────────────────────
 
     async def kernel_variables(c: Context, w: Writer) -> None:
@@ -472,6 +505,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router.post("/nb/delete/*", nb_delete)
     router.get("/nb/export/*", nb_export)
     router.post("/nb/import", nb_import)
+    router.post("/cells/run-all", run_all)
     router.post("/cells/new", add_cell)
     router.post("/cells/new-md", add_md_cell)
     router.post("/cells/save-md/*", save_md_cell)
