@@ -265,6 +265,58 @@ def _render_output_block(block: dict):
     )
 
 
+_COLLAPSE_THRESHOLD = 20  # lines before collapsing
+_COLLAPSE_PREVIEW = 5     # lines shown when collapsed
+
+
+def _collapsible_text(output: str, base_class: str, id_attr: dict):
+    """Render large text output with collapse/expand toggle."""
+    lines = output.split("\n")
+    total = len(lines)
+    if total <= _COLLAPSE_THRESHOLD:
+        return Pre(
+            id_attr,
+            {"class": base_class + " font-mono text-sm whitespace-pre-wrap break-words"},
+            SafeString(_e.escape(output)),
+        )
+
+    preview = "\n".join(lines[:_COLLAPSE_PREVIEW])
+    sig = f"out_col_{id_attr.get('id', 'x').replace('output-', '')}"
+    btn_class = (
+        "mt-1 text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer"
+    )
+    return Div(
+        id_attr,
+        data.signals({sig: True}),
+        # Collapsed view
+        Div(
+            data.show(f"${sig}"),
+            Pre(
+                {"class": base_class + " font-mono text-sm whitespace-pre-wrap break-words"},
+                SafeString(_e.escape(preview)),
+            ),
+            Button(
+                data.on("click", f"${sig} = false"),
+                {"class": btn_class},
+                f"Show {total - _COLLAPSE_PREVIEW} more lines…",
+            ),
+        ),
+        # Expanded view
+        Div(
+            data.show(f"!${sig}"),
+            Pre(
+                {"class": base_class + " font-mono text-sm whitespace-pre-wrap break-words"},
+                SafeString(_e.escape(output)),
+            ),
+            Button(
+                data.on("click", f"${sig} = true"),
+                {"class": btn_class},
+                "Collapse",
+            ),
+        ),
+    )
+
+
 def _render_output(output: str, is_error: bool, cell_id: int | None = None):
     """Render cell output — handles both plain text and rich JSON blocks."""
     id_attr = {"id": f"output-{cell_id}"} if cell_id else {}
@@ -291,8 +343,8 @@ def _render_output(output: str, is_error: bool, cell_id: int | None = None):
         except (json.JSONDecodeError, TypeError, KeyError):
             pass
 
-    # Plain text fallback
-    return Pre(id_attr, {"class": base_class + " font-mono text-sm whitespace-pre-wrap break-words"}, SafeString(_e.escape(output)))
+    # Plain text — use collapsible for large outputs
+    return _collapsible_text(output, base_class, id_attr)
 
 
 def _cell_toolbar(cell: Cell):

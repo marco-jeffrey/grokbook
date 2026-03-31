@@ -35,8 +35,8 @@
 - [x] Commit
 
 ## Feature 6: Cell Output Collapse/Expand
-- [ ] views.py — collapse logic for large outputs
-- [ ] Commit
+- [x] views.py — collapse logic for large outputs
+- [x] Commit
 
 ## Feature 7: Kernel Variables Inspector
 - [ ] kernel.py — get_variables()
