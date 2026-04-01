@@ -499,7 +499,7 @@ def _code_cell_view(cell: Cell):
             {"class": "flex items-start"},
             _exec_label("In", cell.execution_count),
             Div(
-                {"class": "flex-1 relative"},
+                {"class": "flex-1 relative min-w-0"},
                 # CM6 mount point — app.js creates the editor here
                 Div(
                     {
@@ -564,7 +564,7 @@ def _markdown_cell_view(cell: Cell):
                 "id": f"md-display-{cell.id}",
                 "class": "prose prose-invert prose-sm max-w-none p-4 rounded-lg "
                 "border border-zinc-800 hover:border-zinc-600 transition-colors cursor-text "
-                "ml-[4.5rem]",
+                "ml-[4.5rem] overflow-x-auto",
             },
             data.on(
                 "dblclick",
@@ -741,7 +741,7 @@ def page(
                 {"class": "flex pt-12"},
                 sidebar_view(nb.id, notebooks),
                 Div(
-                    {"class": "flex-1 flex justify-center py-10 px-4 ml-56"},
+                    {"class": "flex-1 flex justify-center py-10 px-4 ml-56 min-w-0 overflow-x-hidden"},
                     notebook(cells, nb.id),
                 ),
             ),
