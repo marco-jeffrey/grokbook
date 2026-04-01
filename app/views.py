@@ -505,7 +505,7 @@ def _code_cell_view(cell: Cell):
                     {
                         "data-cell-id": str(cell.id),
                         "data-cell-type": "code",
-                        "class": "w-full min-h-[4.5rem] rounded-lg border border-zinc-700 "
+                        "class": "w-full min-h-[5.5rem] rounded-lg border border-zinc-700 "
                         "overflow-hidden focus-within:border-indigo-500 transition-colors",
                     },
                 ),
