@@ -680,6 +680,8 @@ def page(
                 ".light-mode { filter: invert(1) hue-rotate(180deg); }"
                 ".light-mode img, .light-mode svg, .light-mode video, "
                 ".light-mode [data-no-invert] { filter: invert(1) hue-rotate(180deg); }"
+                ".cm-editor { min-height: 4.8em; }"
+                ".cm-editor .cm-scroller { min-height: 4.8em; }"
                 "</style>"
             ),
             Script(SafeString(
