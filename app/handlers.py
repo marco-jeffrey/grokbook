@@ -90,7 +90,10 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             finally:
                 if pending_next is not None:
                     pending_next.cancel()
-                await sub_iter.aclose()
+                try:
+                    await sub_iter.aclose()
+                except RuntimeError:
+                    pass  # generator already running during cancellation
 
     # ── notebook switching ────────────────────────────────────────────────
 
