@@ -730,8 +730,8 @@ def _code_cell_view(cell: Cell):
         ),
         Div(
             {"class": "relative"},
-            _exec_label("Out", cell.execution_count, cell.execution_time) if cell.output else SafeString(""),
-            _render_output(cell.output, is_error, cell.id),
+            _exec_label("Out", cell.execution_count, cell.execution_time) if cell.output and cell.output != "(no output)" else SafeString(""),
+            _render_output(cell.output, is_error, cell.id) if cell.output and cell.output != "(no output)" else SafeString(""),
         ),
     )
 

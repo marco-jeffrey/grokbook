@@ -276,7 +276,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     async def _stream_execute(cell_id: int, nb_id: int, code: str, w: Writer) -> str:
         """Stream execution output to the browser, then save to DB."""
         km = await pool.get(nb_id)
-        output = "(no output)"
+        output = ""
         is_error = False
         exec_count = 0
 

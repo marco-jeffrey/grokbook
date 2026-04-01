@@ -137,7 +137,7 @@ class KernelManager:
     @staticmethod
     def _blocks_to_output(blocks: list[dict], has_rich: bool) -> str:
         if not blocks:
-            return "(no output)"
+            return ""
         if not has_rich:
             return "".join(b["data"] for b in blocks)
         return json.dumps(blocks)
