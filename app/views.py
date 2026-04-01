@@ -467,12 +467,24 @@ def _cell_toolbar(cell: Cell):
     )
 
 
-def _exec_label(prefix: str, count: int):
-    """Render In [N]: or Out[N]: label."""
+def _fmt_time(secs: float) -> str:
+    """Human-friendly execution time."""
+    if secs < 60:
+        return f"{secs:.2f}s"
+    m, s = divmod(int(secs), 60)
+    if m < 60:
+        return f"{m}m {s:02d}s"
+    h, m = divmod(m, 60)
+    return f"{h}h {m:02d}m"
+
+
+def _exec_label(prefix: str, count: int, time: float = 0.0):
+    """Render In [N]: or Out[N]: label, optionally with timing underneath."""
     n = str(count) if count > 0 else " "
-    return Span(
+    return Div(
         {"class": "text-xs font-mono text-zinc-500 select-none mr-2 shrink-0 w-16 text-right"},
-        f"{prefix}[{n}]:",
+        Div(f"{prefix}[{n}]:"),
+        Div({"class": "text-[10px] text-zinc-600"}, _fmt_time(time)) if time > 0 else SafeString(""),
     )
 
 
@@ -533,13 +545,9 @@ def _code_cell_view(cell: Cell):
         ),
         Div(
             {"class": "flex items-start"},
-            _exec_label("Out", cell.execution_count) if cell.output else SafeString(""),
+            _exec_label("Out", cell.execution_count, cell.execution_time) if cell.output else SafeString(""),
             Div({"class": "flex-1"}, _render_output(cell.output, is_error, cell.id)),
         ),
-        Span(
-            {"class": "text-[10px] text-zinc-600 ml-18"},
-            f"{cell.execution_time:.2f}s",
-        ) if cell.execution_time > 0 else SafeString(""),
     )
 
 
