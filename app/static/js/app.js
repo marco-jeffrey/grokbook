@@ -306,11 +306,34 @@
   initCodeEditors();
   resizeMarkdownTextareas();
 
+  // Track which cell has focus so we can restore after SSE re-patch
+  var _focusedCellId = null;
+  document.addEventListener('focusin', function (e) {
+    var cmEl = e.target.closest('[data-cell-type="code"]');
+    if (cmEl) { _focusedCellId = cmEl.dataset.cellId; return; }
+    if (e.target.tagName === 'TEXTAREA' && e.target.dataset.cellId) {
+      _focusedCellId = e.target.dataset.cellId;
+    }
+  });
+  document.addEventListener('focusout', function () {
+    // Don't clear immediately — the re-patch causes a brief focusout
+  });
+
   // Watch for DOM changes (SSE patches recreate cells)
   new MutationObserver(function () {
+    var restoreId = _focusedCellId;
     cleanupOrphanedEditors();
     initCodeEditors();
     resizeMarkdownTextareas();
+    // Restore focus after re-patch
+    if (restoreId && _mode === 'edit') {
+      setTimeout(function () {
+        var cm = window._cmEditors.get(restoreId);
+        if (cm) { cm.focus(); return; }
+        var ta = document.querySelector('textarea[data-cell-id="' + restoreId + '"]');
+        if (ta) ta.focus();
+      }, 10);
+    }
   }).observe(document.body, { childList: true, subtree: true });
 
   // Track focus for mode switching (markdown textareas)
