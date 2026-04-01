@@ -515,10 +515,10 @@ def _code_cell_view(cell: Cell):
                     data.bind(sig),
                     {"data-cell-sync": str(cell.id), "class": "hidden"},
                 ),
-                # Initial content for CM6 (avoids attribute escaping issues)
+                # Initial content for CM6 — pad to 3 lines minimum for clean display
                 Script(
                     {"type": "application/json", "data-cell-content": str(cell.id)},
-                    SafeString(json.dumps(cell.input)),
+                    SafeString(json.dumps(cell.input if cell.input.count("\n") >= 2 else cell.input + "\n" * (2 - cell.input.count("\n")))),
                 ),
                 Div(
                     {
@@ -680,8 +680,6 @@ def page(
                 ".light-mode { filter: invert(1) hue-rotate(180deg); }"
                 ".light-mode img, .light-mode svg, .light-mode video, "
                 ".light-mode [data-no-invert] { filter: invert(1) hue-rotate(180deg); }"
-                ".cm-editor { min-height: 4.8em; }"
-                ".cm-editor .cm-scroller { min-height: 4.8em; }"
                 "</style>"
             ),
             Script(SafeString(
