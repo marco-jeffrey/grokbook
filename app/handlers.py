@@ -33,9 +33,9 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         if not nb:
             w.text("Not Found", 404)
             return
-        notebooks = await db.get_all_notebooks()
+        projects, notebooks_by_project = await _get_sidebar_data()
         cells = await db.get_all_cells(nb_id)
-        w.html(page(nb, notebooks, cells, c.url_for))
+        w.html(page(nb, projects, notebooks_by_project, cells, c.url_for))
 
     # ── SSE live-push ───────────────────────────────────────────────────
 
@@ -48,17 +48,19 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             return
 
         # Send initial state
-        notebooks = await db.get_all_notebooks()
+        projects, notebooks_by_project = await _get_sidebar_data()
         cells = await db.get_all_cells(nb_id)
         w.patch(element=notebook(cells, nb_id), selector="#notebook")
-        w.patch(element=sidebar_view(nb_id, notebooks), selector="#sidebar")
+        w.patch(element=sidebar_view(nb_id, projects, notebooks_by_project), selector="#sidebar")
 
         # Loop: wait for relay events, re-patch. Heartbeat every 15s
         # to prevent proxies/browsers from closing idle connections.
         # IMPORTANT: We use asyncio.wait (not wait_for) so the pending
         # __anext__ task is NOT cancelled on timeout — cancelling it would
         # kill the async generator and destroy the relay subscription.
-        sub = relay.subscribe("notebook.*")
+        # Subscribe to all events (notebook.* and project.*) so sidebar
+        # stays in sync across tabs.
+        sub = relay.subscribe("*")
         sub_iter = sub.__aiter__()
         pending_next: asyncio.Task | None = None
         alive = w.alive()
@@ -81,8 +83,8 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
                     parts = subject.split(".")
                     event_nb_id = int(parts[1]) if len(parts) >= 2 else 0
 
-                    notebooks = await db.get_all_notebooks()
-                    w.patch(element=sidebar_view(nb_id, notebooks), selector="#sidebar")
+                    projects, notebooks_by_project = await _get_sidebar_data()
+                    w.patch(element=sidebar_view(nb_id, projects, notebooks_by_project), selector="#sidebar")
 
                     if event_nb_id == nb_id:
                         cells = await db.get_all_cells(nb_id)
@@ -99,10 +101,10 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
 
     async def _patch_all(w: Writer, nb_id: int) -> None:
         """Patch notebook content + sidebar + sync notebook_id signal."""
-        notebooks = await db.get_all_notebooks()
+        projects, notebooks_by_project = await _get_sidebar_data()
         cells = await db.get_all_cells(nb_id)
         w.patch(element=notebook(cells, nb_id), selector="#notebook")
-        w.patch(element=sidebar_view(nb_id, notebooks), selector="#sidebar")
+        w.patch(element=sidebar_view(nb_id, projects, notebooks_by_project), selector="#sidebar")
         w.sync({"notebook_id": nb_id, "last_status": "", "focus_cell": ""})
 
     async def switch_notebook(c: Context, w: Writer) -> None:
@@ -118,14 +120,33 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         await _patch_all(w, nb_id)
 
     async def new_notebook(c: Context, w: Writer) -> None:
-        nb_id = await db.create_notebook()
+        signals = await get_signals(c.req)
+        project_id = int(signals.get("project_id", 1))
+        nb_id = await db.create_notebook(project_id=project_id)
         await _patch_all(w, nb_id)
         relay.publish(f"notebook.{nb_id}.created", "notebook")
 
+    async def new_notebook_in_project(c: Context, w: Writer) -> None:
+        try:
+            project_id = int(c.req.tail)
+        except ValueError:
+            w.text("Not Found", 404)
+            return
+        nb_id = await db.create_notebook(project_id=project_id)
+        await _patch_all(w, nb_id)
+        relay.publish(f"notebook.{nb_id}.created", "notebook")
+
+    async def _get_sidebar_data():
+        projects = await db.get_all_projects()
+        notebooks_by_project = {}
+        for p in projects:
+            notebooks_by_project[p.id] = await db.get_notebooks_by_project(p.id)
+        return projects, notebooks_by_project
+
     async def _patch_sidebar(w: Writer, active_id: int, **kwargs) -> None:
-        notebooks = await db.get_all_notebooks()
+        projects, notebooks_by_project = await _get_sidebar_data()
         w.patch(
-            element=sidebar_view(active_id, notebooks, **kwargs),
+            element=sidebar_view(active_id, projects, notebooks_by_project, **kwargs),
             selector="#sidebar",
         )
 
@@ -176,6 +197,45 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         else:
             await _patch_sidebar(w, active_id)
         relay.publish(f"notebook.{nb_id}.deleted", "notebook")
+
+    # ── projects ──────────────────────────────────────────────────────────
+
+    async def new_project(c: Context, w: Writer) -> None:
+        project_id = await db.create_project()
+        active_id = await _get_active_id(c)
+        await _patch_sidebar(w, active_id)
+        relay.publish(f"project.{project_id}.created", "project")
+
+    async def project_menu(c: Context, w: Writer) -> None:
+        project_id = int(c.req.tail)
+        active_id = await _get_active_id(c)
+        await _patch_sidebar(w, active_id, project_menu_id=project_id)
+
+    async def project_menu_close(c: Context, w: Writer) -> None:
+        active_id = await _get_active_id(c)
+        await _patch_sidebar(w, active_id)
+
+    async def project_rename_mode(c: Context, w: Writer) -> None:
+        project_id = int(c.req.tail)
+        active_id = await _get_active_id(c)
+        await _patch_sidebar(w, active_id, project_renaming_id=project_id)
+
+    async def project_rename(c: Context, w: Writer) -> None:
+        project_id = int(c.req.tail)
+        signals = await get_signals(c.req)
+        name = signals.get(f"proj_rename_{project_id}", "").strip()
+        if name:
+            await db.rename_project(project_id, name)
+        active_id = int(signals.get("notebook_id", 0))
+        await _patch_sidebar(w, active_id)
+        relay.publish(f"project.{project_id}.updated", "project")
+
+    async def project_delete(c: Context, w: Writer) -> None:
+        project_id = int(c.req.tail)
+        active_id = await _get_active_id(c)
+        await db.delete_project(project_id)
+        await _patch_sidebar(w, active_id)
+        relay.publish(f"project.{project_id}.deleted", "project")
 
     # ── cells ─────────────────────────────────────────────────────────────
 
@@ -537,8 +597,15 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router.post("/nb/rename/*", nb_rename)
     router.post("/nb/duplicate/*", nb_duplicate)
     router.post("/nb/delete/*", nb_delete)
+    router.post("/nb/new-in/*", new_notebook_in_project)
     router.get("/nb/export/*", nb_export)
     router.post("/nb/import", nb_import)
+    router.post("/project/new", new_project)
+    router.post("/project/menu/*", project_menu)
+    router.post("/project/menu-close", project_menu_close)
+    router.post("/project/rename-mode/*", project_rename_mode)
+    router.post("/project/rename/*", project_rename)
+    router.post("/project/delete/*", project_delete)
     router.post("/cells/run-all", run_all)
     router.post("/cells/clear-output/*", clear_output)
     router.post("/cells/clear-all-outputs", clear_all_outputs)

@@ -25,7 +25,7 @@ from stario.html import (
 from stario import UrlFor
 
 from app.ansi import ansi_to_html
-from app.state import Cell, Notebook
+from app.state import Cell, Notebook, Project
 
 _md = MarkdownIt("gfm-like")
 
@@ -308,12 +308,110 @@ def _nb_item_rename(nb: Notebook):
     )
 
 
-def sidebar_view(
-    active_id: int,
+def _project_header(project: Project, project_menu_id: int | None = None):
+    """Clickable project header with collapse toggle and menu."""
+    sig = f"$proj_{project.id}_open"
+    return Div(
+        {"class": "flex items-center justify-between group/proj mb-1 mt-3 first:mt-0"},
+        Button(
+            data.on("click", f"{sig} = !{sig}"),
+            {"class": "flex items-center gap-1.5 text-xs font-semibold text-zinc-500 "
+             "uppercase tracking-wider hover:text-zinc-300 transition-colors cursor-pointer truncate flex-1"},
+            Span(
+                {"class": "transition-transform text-[10px]"},
+                data.class_("rotate-90", sig),
+                "▶",
+            ),
+            Span({"class": "truncate"}, project.name),
+        ),
+        Button(
+            data.on("click", at.post(f"/project/menu/{project.id}")),
+            {"class": "px-1 py-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-700 "
+             "opacity-0 group-hover/proj:opacity-100 transition-opacity cursor-pointer text-xs"},
+            "⋯",
+        ),
+    )
+
+
+def _project_menu(project: Project, active_id: int):
+    """Dropdown menu for a project."""
+    btn = (
+        "block w-full text-left px-3 py-1.5 text-sm text-zinc-300 "
+        "hover:bg-zinc-700 rounded cursor-pointer"
+    )
+    return Div(
+        {"class": "relative mb-1 mt-3"},
+        Div(
+            {"class": "flex items-center gap-1.5 text-xs font-semibold text-zinc-400 "
+             "uppercase tracking-wider px-1"},
+            project.name,
+        ),
+        Div(
+            {"class": "absolute left-0 top-full mt-1 w-full bg-zinc-800 border border-zinc-600 "
+             "rounded-lg shadow-xl z-50 py-1"},
+            Button(data.on("click", at.post(f"/project/rename-mode/{project.id}")), {"class": btn}, "Rename"),
+            Button(
+                data.on("click", at.post(f"/nb/new-in/{project.id}")),
+                {"class": btn},
+                "+ New Notebook",
+            ),
+            Button(
+                data.on("click", at.post(f"/project/delete/{project.id}")),
+                {"class": "block w-full text-left px-3 py-1.5 text-sm text-red-400 "
+                 "hover:bg-zinc-700 rounded cursor-pointer"},
+                "Delete",
+            ),
+        ),
+        # Click-away overlay
+        Div(
+            data.on("click", at.post("/project/menu-close")),
+            {"class": "fixed inset-0 z-40", "style": "cursor: default"},
+        ),
+    )
+
+
+def _project_rename(project: Project):
+    """Project in rename mode — input field."""
+    sig = f"proj_rename_{project.id}"
+    return Div(
+        {"class": "mb-1 mt-3"},
+        data.signals({sig: project.name}),
+        Input(
+            data.bind(sig),
+            data.on(
+                "keydown",
+                f"if(evt.key==='Enter'){{{at.post(f'/project/rename/{project.id}', include=[sig])}}};"
+                f"if(evt.key==='Escape'){{{at.post('/project/menu-close')}}}",
+            ),
+            {
+                "type": "text",
+                "autofocus": True,
+                "class": "w-full px-3 py-1.5 rounded-md text-xs bg-zinc-800 border border-indigo-500 "
+                "text-zinc-200 outline-none uppercase tracking-wider font-semibold",
+            },
+        ),
+    )
+
+
+def _project_section(
+    project: Project,
     notebooks: list[Notebook],
+    active_id: int,
     menu_id: int | None = None,
     renaming_id: int | None = None,
+    project_menu_id: int | None = None,
+    project_renaming_id: int | None = None,
 ):
+    """A project header + its notebook list (collapsible)."""
+    # Project header (or menu/rename mode)
+    if project_renaming_id == project.id:
+        header = _project_rename(project)
+    elif project_menu_id == project.id:
+        header = _project_menu(project, active_id)
+    else:
+        header = _project_header(project, project_menu_id)
+
+    # Notebook items
     items = []
     for nb in notebooks:
         if renaming_id == nb.id:
@@ -322,6 +420,38 @@ def sidebar_view(
             items.append(_nb_item_menu(nb, active_id))
         else:
             items.append(_nb_item(nb, active_id))
+
+    sig = f"$proj_{project.id}_open"
+    return Div(
+        header,
+        Div(
+            data.show(sig),
+            *items,
+        ) if items else SafeString(""),
+    )
+
+
+def sidebar_view(
+    active_id: int,
+    projects: list[Project],
+    notebooks_by_project: dict[int, list[Notebook]],
+    menu_id: int | None = None,
+    renaming_id: int | None = None,
+    project_menu_id: int | None = None,
+    project_renaming_id: int | None = None,
+):
+    sections = []
+    for project in projects:
+        nbs = notebooks_by_project.get(project.id, [])
+        sections.append(
+            _project_section(
+                project, nbs, active_id,
+                menu_id=menu_id,
+                renaming_id=renaming_id,
+                project_menu_id=project_menu_id,
+                project_renaming_id=project_renaming_id,
+            )
+        )
 
     return Div(
         {
@@ -333,15 +463,15 @@ def sidebar_view(
             {"class": "text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3"},
             "Notebooks",
         ),
-        *items,
+        *sections,
         Button(
-            data.on("click", at.post("/nb/new")),
+            data.on("click", at.post("/project/new")),
             {
-                "class": "block w-full text-left px-3 py-2 rounded-md text-sm mt-3 text-zinc-500 "
+                "class": "block w-full text-left px-3 py-2 rounded-md text-sm mt-4 text-zinc-500 "
                 "hover:text-indigo-400 hover:bg-zinc-800 transition-colors "
                 "border border-dashed border-zinc-700 cursor-pointer",
             },
-            "+ New Notebook",
+            "+ New Project",
         ),
         # Import .ipynb — file input hidden, label acts as button
         Label(
@@ -718,7 +848,8 @@ def variables_panel():
 
 def page(
     nb: Notebook,
-    notebooks: list[Notebook],
+    projects: list[Project],
+    notebooks_by_project: dict[int, list[Notebook]],
     cells: list[Cell],
     url_for: UrlFor,
 ):
@@ -771,6 +902,7 @@ def page(
                     "editor_autocomplete": True,
                     "editor_linewrap": False,
                     "editor_vim": False,
+                    **{f"proj_{p.id}_open": True for p in projects},
                 }
             ),
             data.init(at.get("/events", retry_interval_ms=2000, retry_max_count=0)),
@@ -812,7 +944,7 @@ def page(
             header_bar(),
             Div(
                 {"class": "flex pt-12"},
-                sidebar_view(nb.id, notebooks),
+                sidebar_view(nb.id, projects, notebooks_by_project),
                 Div(
                     {"class": "flex-1 flex justify-center py-10 px-4 pl-20 ml-56 min-w-0 overflow-x-hidden"},
                     notebook(cells, nb.id),
