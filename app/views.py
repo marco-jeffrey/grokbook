@@ -40,6 +40,25 @@ _SPINNER_SVG = SafeString(
 # ── components ────────────────────────────────────────────────────────────────
 
 
+def _settings_toggle(label: str, signal: str):
+    """A labeled toggle switch for the settings dropdown."""
+    return Div(
+        data.on("click", f"{signal} = !{signal}"),
+        {"class": "flex items-center justify-between cursor-pointer select-none group/st"},
+        Span({"class": "text-xs text-zinc-300 group-hover/st:text-zinc-100"}, label),
+        Div(
+            {"class": "w-7 h-4 rounded-full relative transition-colors"},
+            data.class_("bg-indigo-500", signal),
+            data.class_("bg-zinc-600", f"!{signal}"),
+            Div(
+                {"class": "absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all"},
+                data.class_("left-3.5", signal),
+                data.class_("left-0.5", f"!{signal}"),
+            ),
+        ),
+    )
+
+
 def header_bar():
     return Div(
         {
@@ -104,6 +123,42 @@ def header_bar():
                     "cursor-pointer px-3 py-1 rounded border border-zinc-700 hover:border-zinc-500"
                 },
                 "Theme",
+            ),
+            # ── Settings dropdown ──
+            Div(
+                {"class": "relative"},
+                Button(
+                    data.on("click", "$show_settings = !$show_settings"),
+                    {
+                        "class": "text-xs text-zinc-500 hover:text-zinc-200 transition-colors "
+                        "cursor-pointer px-3 py-1 rounded border border-zinc-700 hover:border-zinc-500"
+                    },
+                    "⚙",
+                ),
+                Div(
+                    data.show("$show_settings"),
+                    {
+                        "class": "absolute right-0 top-full mt-2 w-56 bg-zinc-800 border border-zinc-600 "
+                        "rounded-lg shadow-xl z-50 p-3 space-y-3",
+                        "style": "display:none",
+                    },
+                    Div(
+                        {"class": "text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2"},
+                        "Editor Settings",
+                    ),
+                    # Autocomplete toggle
+                    _settings_toggle("Autocomplete", "$editor_autocomplete"),
+                    # Line wrap toggle
+                    _settings_toggle("Line Wrap", "$editor_linewrap"),
+                    # Vim mode toggle
+                    _settings_toggle("Vim Mode", "$editor_vim"),
+                ),
+                # Click-away overlay
+                Div(
+                    data.on("click", "$show_settings = false"),
+                    data.show("$show_settings"),
+                    {"class": "fixed inset-0 z-40", "style": "display:none"},
+                ),
             ),
             Button(
                 data.on("click", at.post("/cells/run-all", include=["notebook_id"])),
@@ -685,11 +740,15 @@ def page(
             Script(SafeString(
                 "(function(){var t=localStorage.getItem('nb-theme');"
                 "var w=localStorage.getItem('nb-wide')==='true';"
+                "var ac=localStorage.getItem('nb-autocomplete')!=='false';"
+                "var lw=localStorage.getItem('nb-linewrap')==='true';"
+                "var vm=localStorage.getItem('nb-vim')==='true';"
                 "if(t==='light'){document.documentElement.classList.add('light-mode');}"
                 "document.addEventListener('DOMContentLoaded',function(){"
                 "var b=document.body;if(b){var s=JSON.parse(b.getAttribute('data-signals')||'{}');"
                 "if(t==='light')s.light_mode=true;"
                 "if(w)s.wide_mode=true;"
+                "s.editor_autocomplete=ac;s.editor_linewrap=lw;s.editor_vim=vm;"
                 "b.setAttribute('data-signals',JSON.stringify(s));}});})()"
             )),
         ),
@@ -706,8 +765,12 @@ def page(
                     "focus_cell": "",
                     "kernel_state": "idle",
                     "show_vars": False,
+                    "show_settings": False,
                     "wide_mode": False,
                     "light_mode": False,
+                    "editor_autocomplete": True,
+                    "editor_linewrap": False,
+                    "editor_vim": False,
                 }
             ),
             data.init(at.get("/events", retry_interval_ms=2000, retry_max_count=0)),
@@ -724,6 +787,16 @@ def page(
             ),
             Span(
                 data.effect("localStorage.setItem('nb-wide',String($wide_mode))"),
+                {"style": "display:none"},
+            ),
+            Span(
+                data.effect(
+                    "localStorage.setItem('nb-autocomplete',String($editor_autocomplete));"
+                    "localStorage.setItem('nb-linewrap',String($editor_linewrap));"
+                    "localStorage.setItem('nb-vim',String($editor_vim));"
+                    "window._applyEditorSettings&&window._applyEditorSettings("
+                    "$editor_autocomplete,$editor_linewrap,$editor_vim)"
+                ),
                 {"style": "display:none"},
             ),
             Span(

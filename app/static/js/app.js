@@ -10,6 +10,26 @@
   // CM6 editor registry: cellId → {view, getDoc, setDoc, focus, destroy}
   window._cmEditors = new Map();
 
+  // Editor settings (read from localStorage, updated by Datastar effect)
+  var _editorSettings = {
+    autocomplete: localStorage.getItem('nb-autocomplete') !== 'false',
+    linewrap: localStorage.getItem('nb-linewrap') === 'true',
+    vim: localStorage.getItem('nb-vim') === 'true',
+  };
+
+  window._applyEditorSettings = function (ac, lw, vm) {
+    _editorSettings.autocomplete = ac;
+    _editorSettings.linewrap = lw;
+    _editorSettings.vim = vm;
+    window._cmEditors.forEach(function (editor, cellId) {
+      CM.reconfigure(editor.view, 'autocomplete', ac, {
+        completionSource: makeCompletionSource(cellId)
+      });
+      CM.reconfigure(editor.view, 'lineWrap', lw);
+      CM.reconfigure(editor.view, 'vim', vm);
+    });
+  };
+
   function nbId() { return document.body.dataset.notebookId; }
 
   // ── cell selection helpers ─────────────────────────────────────────────
@@ -188,6 +208,9 @@
 
     var editor = window.CM.createEditor(container, {
       doc: initialDoc,
+      autocompleteEnabled: _editorSettings.autocomplete,
+      lineWrapEnabled: _editorSettings.linewrap,
+      vimEnabled: _editorSettings.vim,
       onDocChanged: function (newDoc) {
         syncToSignal(cellId, newDoc);
         autosave(cellId, newDoc);
