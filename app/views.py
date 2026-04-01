@@ -479,10 +479,10 @@ def _fmt_time(secs: float) -> str:
 
 
 def _exec_label(prefix: str, count: int, time: float = 0.0):
-    """Render In [N]: or Out[N]: label, optionally with timing underneath."""
+    """Render In [N]: or Out[N]: label, positioned absolutely to the left."""
     n = str(count) if count > 0 else " "
     return Div(
-        {"class": "text-xs font-mono text-zinc-500 select-none mr-2 shrink-0 w-16 text-right"},
+        {"class": "absolute -left-16 top-2 text-xs font-mono text-zinc-500 select-none w-14 text-right"},
         Div(f"{prefix}[{n}]:"),
         Div({"class": "text-[10px] text-zinc-600"}, _fmt_time(time)) if time > 0 else SafeString(""),
     )
@@ -496,10 +496,10 @@ def _code_cell_view(cell: Cell):
         _cell_toolbar(cell),
         data.signals({sig: cell.input}),
         Div(
-            {"class": "flex items-start"},
+            {"class": "relative"},
             _exec_label("In", cell.execution_count),
             Div(
-                {"class": "flex-1 relative min-w-0"},
+                {"class": "relative"},
                 # CM6 mount point — app.js creates the editor here
                 Div(
                     {
@@ -538,15 +538,15 @@ def _code_cell_view(cell: Cell):
         ),
         # Status hint
         Div(
-            {"class": "mt-1 flex items-center gap-2 text-xs ml-18"},
+            {"class": "mt-1 flex items-center gap-2 text-xs"},
             SafeString(""),
             Span({"class": "text-green-400"}, "✓") if cell.status == "ok" else SafeString(""),
             Span({"class": "text-red-400"}, "✗") if cell.status == "error" else SafeString(""),
         ),
         Div(
-            {"class": "flex items-start"},
+            {"class": "relative"},
             _exec_label("Out", cell.execution_count, cell.execution_time) if cell.output else SafeString(""),
-            Div({"class": "flex-1"}, _render_output(cell.output, is_error, cell.id)),
+            _render_output(cell.output, is_error, cell.id),
         ),
     )
 
@@ -564,7 +564,7 @@ def _markdown_cell_view(cell: Cell):
                 "id": f"md-display-{cell.id}",
                 "class": "prose prose-invert prose-sm max-w-none p-4 rounded-lg "
                 "border border-zinc-800 hover:border-zinc-600 transition-colors cursor-text "
-                "ml-[4.5rem] overflow-x-auto",
+                "overflow-x-auto",
             },
             data.on(
                 "dblclick",
@@ -741,7 +741,7 @@ def page(
                 {"class": "flex pt-12"},
                 sidebar_view(nb.id, notebooks),
                 Div(
-                    {"class": "flex-1 flex justify-center py-10 px-4 ml-56 min-w-0 overflow-x-hidden"},
+                    {"class": "flex-1 flex justify-center py-10 px-4 pl-20 ml-56 min-w-0 overflow-x-hidden"},
                     notebook(cells, nb.id),
                 ),
             ),
