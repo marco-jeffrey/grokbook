@@ -199,6 +199,68 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_projects",
+            "description": "List all projects with their notebooks.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_project",
+            "description": "Create a new project.",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string", "default": "New Project"}},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rename_project",
+            "description": "Rename a project.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "integer"},
+                    "name": {"type": "string"},
+                },
+                "required": ["project_id", "name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_project",
+            "description": "Delete a project. Notebooks are moved to Default.",
+            "parameters": {
+                "type": "object",
+                "properties": {"project_id": {"type": "integer"}},
+                "required": ["project_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "move_notebook",
+            "description": "Move a notebook to a different project.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook_id": {"type": "integer"},
+                    "project_id": {"type": "integer"},
+                },
+                "required": ["notebook_id", "project_id"],
+            },
+        },
+    },
 ]
 
 
@@ -215,7 +277,17 @@ def _serialize_cell(cell) -> dict:
 
 
 def _serialize_notebook(nb) -> dict:
-    return {"id": nb.id, "name": nb.name, "updated_at": nb.updated_at}
+    return {
+        "id": nb.id,
+        "name": nb.name,
+        "updated_at": nb.updated_at,
+        "project_id": nb.project_id,
+        "order_index": nb.order_index,
+    }
+
+
+def _serialize_project(p) -> dict:
+    return {"id": p.id, "name": p.name, "order_index": p.order_index}
 
 
 async def _execute_tool(
@@ -234,7 +306,7 @@ async def _execute_tool(
         return {**_serialize_notebook(nb), "cells": [_serialize_cell(c) for c in cells]}
 
     if name == "create_notebook":
-        nb_id = await db.create_notebook(args.get("name", "Untitled"))
+        nb_id = await db.create_notebook(args.get("name", "Untitled"), project_id=args.get("project_id", 1))
         nb = await db.get_notebook(nb_id)
         relay.publish(f"notebook.{nb_id}.created", "notebook")
         return _serialize_notebook(nb)
@@ -323,6 +395,40 @@ async def _execute_tool(
         await pool.restart(nb_id)
         relay.publish(f"notebook.{nb_id}.kernel_restarted", "kernel")
         return {"state": "idle"}
+
+    if name == "list_projects":
+        projects = await db.get_all_projects()
+        result = []
+        for p in projects:
+            nbs = await db.get_notebooks_by_project(p.id)
+            result.append({
+                **_serialize_project(p),
+                "notebooks": [_serialize_notebook(nb) for nb in nbs],
+            })
+        return result
+
+    if name == "create_project":
+        project_id = await db.create_project(args.get("name", "New Project"))
+        p = await db.get_project(project_id)
+        return _serialize_project(p)
+
+    if name == "rename_project":
+        await db.rename_project(args["project_id"], args["name"])
+        p = await db.get_project(args["project_id"])
+        return _serialize_project(p) if p else {"error": "not found"}
+
+    if name == "delete_project":
+        await db.delete_project(args["project_id"])
+        return {"ok": True}
+
+    if name == "move_notebook":
+        nb_id = args["notebook_id"]
+        await db.move_notebook_to_project(nb_id, args["project_id"])
+        nb = await db.get_notebook(nb_id)
+        if not nb:
+            return {"error": "not found"}
+        relay.publish(f"notebook.{nb_id}.moved", "notebook")
+        return _serialize_notebook(nb)
 
     return {"error": f"unknown tool: {name}"}
 

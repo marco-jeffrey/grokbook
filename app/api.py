@@ -7,7 +7,7 @@ from stario.http.types import Context, Writer
 
 from app.db import Database
 from app.kernel import KernelPool
-from app.state import Cell, Notebook
+from app.state import Cell, Notebook, Project
 
 
 def _serialize_cell(cell: Cell) -> dict:
@@ -24,7 +24,17 @@ def _serialize_cell(cell: Cell) -> dict:
 
 
 def _serialize_notebook(nb: Notebook) -> dict:
-    return {"id": nb.id, "name": nb.name, "updated_at": nb.updated_at}
+    return {
+        "id": nb.id,
+        "name": nb.name,
+        "updated_at": nb.updated_at,
+        "project_id": nb.project_id,
+        "order_index": nb.order_index,
+    }
+
+
+def _serialize_project(p: Project) -> dict:
+    return {"id": p.id, "name": p.name, "order_index": p.order_index}
 
 
 def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
@@ -39,7 +49,8 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     async def create_notebook(c: Context, w: Writer) -> None:
         body = await c.req.json()
         name = body.get("name", "Untitled")
-        nb_id = await db.create_notebook(name)
+        project_id = body.get("project_id", 1)
+        nb_id = await db.create_notebook(name, project_id=int(project_id))
         nb = await db.get_notebook(nb_id)
         w.json(_serialize_notebook(nb), 201)
         relay.publish(f"notebook.{nb_id}.created", "notebook")
@@ -374,10 +385,83 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         await km.interrupt()
         w.json({"ok": True})
 
+    # ── projects ──────────────────────────────────────────────────────────
+
+    async def list_projects(c: Context, w: Writer) -> None:
+        projects = await db.get_all_projects()
+        result = []
+        for p in projects:
+            nbs = await db.get_notebooks_by_project(p.id)
+            result.append({
+                **_serialize_project(p),
+                "notebooks": [_serialize_notebook(nb) for nb in nbs],
+            })
+        w.json(result)
+
+    async def create_project(c: Context, w: Writer) -> None:
+        try:
+            body = await c.req.json()
+            name = body.get("name", "New Project")
+        except Exception:
+            name = "New Project"
+        project_id = await db.create_project(name)
+        p = await db.get_project(project_id)
+        w.json(_serialize_project(p), 201)
+
+    async def update_project(c: Context, w: Writer) -> None:
+        try:
+            project_id = int(c.req.tail)
+        except ValueError:
+            w.json({"error": "invalid project id"}, 400)
+            return
+        body = await c.req.json()
+        name = body.get("name")
+        if name:
+            await db.rename_project(project_id, name)
+        p = await db.get_project(project_id)
+        if not p:
+            w.json({"error": "not found"}, 404)
+            return
+        w.json(_serialize_project(p))
+
+    async def delete_project(c: Context, w: Writer) -> None:
+        try:
+            project_id = int(c.req.tail)
+        except ValueError:
+            w.json({"error": "invalid project id"}, 400)
+            return
+        await db.delete_project(project_id)
+        w.json({"ok": True})
+
+    async def move_notebook(c: Context, w: Writer) -> None:
+        try:
+            nb_id = int(c.req.tail)
+        except ValueError:
+            w.json({"error": "invalid notebook id"}, 400)
+            return
+        body = await c.req.json()
+        project_id = body.get("project_id")
+        if not project_id:
+            w.json({"error": "project_id required"}, 400)
+            return
+        await db.move_notebook_to_project(nb_id, int(project_id))
+        nb = await db.get_notebook(nb_id)
+        if not nb:
+            w.json({"error": "not found"}, 404)
+            return
+        w.json(_serialize_notebook(nb))
+        relay.publish(f"notebook.{nb_id}.moved", "notebook")
+
     # ── routes ────────────────────────────────────────────────────────────
+
+    router.get("/projects", list_projects)
+    router.post("/projects", create_project)
+    router.put("/projects/*", update_project)
+    router.delete("/projects/*", delete_project)
 
     router.get("/notebooks", list_notebooks)
     router.post("/notebooks", create_notebook)
+    router.post("/notebooks/move/*", move_notebook)
     router.get("/notebooks/*", get_notebook)
     router.put("/notebooks/*", update_notebook)
     router.post("/notebooks/duplicate/*", duplicate_notebook)
