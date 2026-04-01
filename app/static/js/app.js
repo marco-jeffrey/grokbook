@@ -91,6 +91,24 @@
     }
   }
 
+  function focusNextCell(currentCellId) {
+    var ids = getAllCellIds();
+    var idx = ids.indexOf(currentCellId);
+    if (idx === -1 || idx >= ids.length - 1) return;
+    var nextId = ids[idx + 1];
+    _selectedCellId = nextId;
+    // Small delay to let any DOM updates settle
+    setTimeout(function () {
+      var cm = window._cmEditors.get(nextId);
+      if (cm) {
+        cm.focus();
+      } else {
+        var ta = document.querySelector('textarea[data-cell-id="' + nextId + '"]');
+        if (ta) ta.focus();
+      }
+    }, 50);
+  }
+
   // fire-and-forget POST
   function firePost(path) {
     fetch(path, { method: 'POST' });
@@ -230,6 +248,8 @@
             hideSignature(cellId);
             var btn = document.getElementById('run-btn-' + cellId);
             if (btn) btn.click();
+            // Focus next cell immediately
+            focusNextCell(cellId);
             return true;
           }
         },
@@ -382,6 +402,7 @@
         e.preventDefault();
         var btn = document.getElementById('run-btn-' + ta.dataset.cellId);
         if (btn) btn.click();
+        focusNextCell(ta.dataset.cellId);
         return;
       }
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
