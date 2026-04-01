@@ -2,10 +2,19 @@ from dataclasses import dataclass
 
 
 @dataclass
+class Project:
+    id: int
+    name: str
+    order_index: int = 0
+
+
+@dataclass
 class Notebook:
     id: int
     name: str
-    updated_at: str
+    project_id: int = 1
+    order_index: int = 0
+    updated_at: str = ""
 
 
 @dataclass

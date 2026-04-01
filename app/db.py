@@ -2,11 +2,11 @@ import logging
 
 import aiosqlite
 
-from app.state import Cell, Notebook
+from app.state import Cell, Notebook, Project
 
 log = logging.getLogger(__name__)
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 
 _CREATE_NOTEBOOKS = """
 CREATE TABLE IF NOT EXISTS notebooks (
@@ -41,6 +41,17 @@ def _row_to_cell(r) -> Cell:
         status=r["status"],
         execution_count=r["execution_count"] if "execution_count" in keys else 0,
         execution_time=r["execution_time"] if "execution_time" in keys else 0.0,
+    )
+
+
+def _row_to_notebook(r) -> Notebook:
+    keys = r.keys()
+    return Notebook(
+        id=r["id"],
+        name=r["name"],
+        project_id=r["project_id"] if "project_id" in keys else 1,
+        order_index=r["order_index"] if "order_index" in keys else 0,
+        updated_at=r["updated_at"],
     )
 
 
@@ -155,11 +166,63 @@ async def _migrate_v3_to_v4(conn: aiosqlite.Connection) -> None:
         )
 
 
+async def _migrate_v4_to_v5(conn: aiosqlite.Connection) -> None:
+    """V5: Add projects table and project_id/order_index to notebooks."""
+    log.info("Migration v4→v5: adding projects support")
+    # Create projects table
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL DEFAULT 'Default',
+            order_index INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    # Insert default project
+    async with conn.execute("SELECT COUNT(*) AS n FROM projects") as cur:
+        row = await cur.fetchone()
+    if row["n"] == 0:
+        await conn.execute("INSERT INTO projects (name) VALUES ('Default')")
+    # Get default project id
+    async with conn.execute("SELECT id FROM projects ORDER BY id LIMIT 1") as cur:
+        row = await cur.fetchone()
+    default_id = row["id"]
+    # Add project_id to notebooks
+    async with conn.execute(
+        "SELECT COUNT(*) AS n FROM pragma_table_info('notebooks') WHERE name = 'project_id'"
+    ) as cur:
+        row = await cur.fetchone()
+    if row["n"] == 0:
+        await conn.execute(
+            f"ALTER TABLE notebooks ADD COLUMN project_id INTEGER NOT NULL DEFAULT {default_id}"
+        )
+    # Add order_index to notebooks
+    async with conn.execute(
+        "SELECT COUNT(*) AS n FROM pragma_table_info('notebooks') WHERE name = 'order_index'"
+    ) as cur:
+        row = await cur.fetchone()
+    if row["n"] == 0:
+        await conn.execute(
+            "ALTER TABLE notebooks ADD COLUMN order_index INTEGER NOT NULL DEFAULT 0"
+        )
+        # Assign sequential order based on current updated_at DESC
+        async with conn.execute(
+            "SELECT id FROM notebooks ORDER BY updated_at DESC"
+        ) as cur:
+            rows = await cur.fetchall()
+        for i, row in enumerate(rows):
+            await conn.execute(
+                "UPDATE notebooks SET order_index = ? WHERE id = ?", (i, row["id"])
+            )
+
+
 _MIGRATIONS = [
     (0, 1, _migrate_v0_to_v1),
     (1, 2, _migrate_v1_to_v2),
     (2, 3, _migrate_v2_to_v3),
     (3, 4, _migrate_v3_to_v4),
+    (4, 5, _migrate_v4_to_v5),
 ]
 
 
@@ -185,31 +248,34 @@ class Database:
 
     # ── notebooks ─────────────────────────────────────────────────────────
 
-    async def create_notebook(self, name: str = "Untitled") -> int:
+    async def create_notebook(self, name: str = "Untitled", project_id: int = 1) -> int:
+        async with self._conn.execute(
+            "SELECT COALESCE(MAX(order_index), -1) + 1 AS next_ord FROM notebooks WHERE project_id = ?",
+            (project_id,),
+        ) as cur:
+            r = await cur.fetchone()
         cur = await self._conn.execute(
-            "INSERT INTO notebooks (name) VALUES (?)", (name,)
+            "INSERT INTO notebooks (name, project_id, order_index) VALUES (?, ?, ?)",
+            (name, project_id, r["next_ord"]),
         )
         await self._conn.commit()
         return cur.lastrowid
 
     async def get_all_notebooks(self) -> list[Notebook]:
         async with self._conn.execute(
-            "SELECT id, name, updated_at FROM notebooks ORDER BY updated_at DESC"
+            "SELECT id, name, project_id, order_index, updated_at FROM notebooks ORDER BY order_index"
         ) as cur:
             rows = await cur.fetchall()
-        return [
-            Notebook(id=r["id"], name=r["name"], updated_at=r["updated_at"])
-            for r in rows
-        ]
+        return [_row_to_notebook(r) for r in rows]
 
     async def get_notebook(self, nb_id: int) -> Notebook | None:
         async with self._conn.execute(
-            "SELECT id, name, updated_at FROM notebooks WHERE id = ?", (nb_id,)
+            "SELECT id, name, project_id, order_index, updated_at FROM notebooks WHERE id = ?", (nb_id,)
         ) as cur:
             r = await cur.fetchone()
         if not r:
             return None
-        return Notebook(id=r["id"], name=r["name"], updated_at=r["updated_at"])
+        return _row_to_notebook(r)
 
     async def get_latest_notebook_id(self) -> int | None:
         async with self._conn.execute(
@@ -233,7 +299,7 @@ class Database:
     async def duplicate_notebook(self, nb_id: int) -> int:
         nb = await self.get_notebook(nb_id)
         name = f"{nb.name} (copy)" if nb else "Untitled (copy)"
-        new_id = await self.create_notebook(name)
+        new_id = await self.create_notebook(name, project_id=nb.project_id if nb else 1)
         cells = await self.get_all_cells(nb_id)
         for i, cell in enumerate(cells):
             await self._conn.execute(
@@ -426,6 +492,81 @@ class Database:
         await self._conn.execute(
             "UPDATE cells SET output = '', status = '', execution_time = 0.0 WHERE notebook_id = ? AND cell_type = 'code'",
             (notebook_id,),
+        )
+        await self._conn.commit()
+
+    # ── projects ───────────────────────────────────────────────────────
+
+    async def create_project(self, name: str = "New Project") -> int:
+        async with self._conn.execute(
+            "SELECT COALESCE(MAX(order_index), -1) + 1 AS next_ord FROM projects"
+        ) as cur:
+            r = await cur.fetchone()
+        cur = await self._conn.execute(
+            "INSERT INTO projects (name, order_index) VALUES (?, ?)",
+            (name, r["next_ord"]),
+        )
+        await self._conn.commit()
+        return cur.lastrowid
+
+    async def get_all_projects(self) -> list[Project]:
+        async with self._conn.execute(
+            "SELECT id, name, order_index FROM projects ORDER BY order_index"
+        ) as cur:
+            rows = await cur.fetchall()
+        return [Project(id=r["id"], name=r["name"], order_index=r["order_index"]) for r in rows]
+
+    async def get_project(self, project_id: int) -> Project | None:
+        async with self._conn.execute(
+            "SELECT id, name, order_index FROM projects WHERE id = ?", (project_id,)
+        ) as cur:
+            r = await cur.fetchone()
+        if not r:
+            return None
+        return Project(id=r["id"], name=r["name"], order_index=r["order_index"])
+
+    async def rename_project(self, project_id: int, name: str) -> None:
+        await self._conn.execute(
+            "UPDATE projects SET name = ?, updated_at = datetime('now') WHERE id = ?",
+            (name, project_id),
+        )
+        await self._conn.commit()
+
+    async def delete_project(self, project_id: int) -> None:
+        # Never delete the first project (Default)
+        async with self._conn.execute(
+            "SELECT id FROM projects ORDER BY id LIMIT 1"
+        ) as cur:
+            r = await cur.fetchone()
+        default_id = r["id"]
+        if project_id == default_id:
+            return  # Cannot delete default project
+        # Move all notebooks to default project
+        await self._conn.execute(
+            "UPDATE notebooks SET project_id = ? WHERE project_id = ?",
+            (default_id, project_id),
+        )
+        await self._conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        await self._conn.commit()
+
+    async def get_notebooks_by_project(self, project_id: int) -> list[Notebook]:
+        async with self._conn.execute(
+            "SELECT id, name, project_id, order_index, updated_at FROM notebooks "
+            "WHERE project_id = ? ORDER BY order_index",
+            (project_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [_row_to_notebook(r) for r in rows]
+
+    async def move_notebook_to_project(self, nb_id: int, project_id: int) -> None:
+        async with self._conn.execute(
+            "SELECT COALESCE(MAX(order_index), -1) + 1 AS next_ord FROM notebooks WHERE project_id = ?",
+            (project_id,),
+        ) as cur:
+            r = await cur.fetchone()
+        await self._conn.execute(
+            "UPDATE notebooks SET project_id = ?, order_index = ? WHERE id = ?",
+            (project_id, r["next_ord"], nb_id),
         )
         await self._conn.commit()
 
