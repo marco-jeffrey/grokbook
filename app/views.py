@@ -500,25 +500,25 @@ def _code_cell_view(cell: Cell):
             _exec_label("In", cell.execution_count),
             Div(
                 {"class": "flex-1 relative"},
+                # CM6 mount point — app.js creates the editor here
+                Div(
+                    {
+                        "data-cell-id": str(cell.id),
+                        "data-cell-type": "code",
+                        "class": "w-full min-h-[4.5rem] rounded-lg border border-zinc-700 "
+                        "overflow-hidden focus-within:border-indigo-500 transition-colors",
+                    },
+                ),
+                # Hidden textarea keeps Datastar signal in sync for run button
                 Textarea(
                     cell.input,
                     data.bind(sig),
-                    {
-                        "data-cell-id": str(cell.id),
-                        "spellcheck": "false",
-                        "class": (
-                            "w-full min-h-[4.5rem] p-3 bg-zinc-900 border border-zinc-700 rounded-lg "
-                            "text-zinc-200 font-mono text-sm leading-relaxed resize-none outline-none "
-                            "focus:border-indigo-500 transition-colors overflow-hidden"
-                        ),
-                    },
+                    {"data-cell-sync": str(cell.id), "class": "hidden"},
                 ),
-                Div(
-                    {
-                        "id": f"completions-{cell.id}",
-                        "class": "hidden absolute z-50 min-w-48 max-h-48 overflow-y-auto "
-                        "bg-zinc-800 border border-zinc-600 rounded-lg shadow-xl",
-                    }
+                # Initial content for CM6 (avoids attribute escaping issues)
+                Script(
+                    {"type": "application/json", "data-cell-content": str(cell.id)},
+                    SafeString(json.dumps(cell.input)),
                 ),
                 Div(
                     {
@@ -674,7 +674,6 @@ def page(
             Meta({"name": "viewport", "content": "width=device-width, initial-scale=1"}),
             Title(f"{nb.name} — nb-staroid"),
             Script({"src": "https://cdn.tailwindcss.com?plugins=typography"}),
-            Script({"src": "https://cdn.jsdelivr.net/npm/textarea-caret@3.1.0/index.js"}),
             DatastarScript(),
             SafeString(
                 "<style>"
@@ -730,8 +729,10 @@ def page(
             Span(
                 data.effect(
                     "if($focus_cell){"
+                    "var cm=window._cmEditors&&window._cmEditors.get($focus_cell);"
+                    "if(cm){cm.focus();}else{"
                     "var el=document.querySelector('textarea[data-cell-id=\"'+$focus_cell+'\"]');"
-                    "if(el){el.focus();}$focus_cell='';}"
+                    "if(el){el.focus();}}$focus_cell='';}"
                 ),
                 {"style": "display:none"},
             ),
@@ -746,6 +747,7 @@ def page(
             ),
             execution_indicator(),
             variables_panel(),
+            Script({"src": url_for("static", "js/codemirror.js")}),
             Script({"src": url_for("static", "js/app.js")}),
         ),
     )
