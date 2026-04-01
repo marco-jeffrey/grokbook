@@ -57,11 +57,11 @@ def header_bar():
                 ),
                 Div(
                     data.show("$kernel_state === 'busy'"),
-                    {"class": "w-2 h-2 rounded-full bg-yellow-400 animate-pulse"},
+                    {"class": "w-2 h-2 rounded-full bg-yellow-400 animate-pulse", "style": "display:none"},
                 ),
                 Div(
                     data.show("$kernel_state === 'dead'"),
-                    {"class": "w-2 h-2 rounded-full bg-red-500"},
+                    {"class": "w-2 h-2 rounded-full bg-red-500", "style": "display:none"},
                 ),
                 Span(
                     {"class": "text-xs text-zinc-500"},
@@ -127,7 +127,8 @@ def header_bar():
                 data.show("$executing"),
                 {
                     "class": "text-xs text-red-400 hover:text-red-300 transition-colors "
-                    "cursor-pointer px-3 py-1 rounded border border-red-700 hover:border-red-500"
+                    "cursor-pointer px-3 py-1 rounded border border-red-700 hover:border-red-500",
+                    "style": "display:none",
                 },
                 "■ Stop",
             ),
@@ -325,21 +326,23 @@ def execution_indicator():
     return Div(
         Div(
             data.show("$executing"),
-            {"class": "fixed bottom-4 left-60 flex items-center gap-2 text-sm text-zinc-400"},
+            {"class": "fixed bottom-4 left-60 flex items-center gap-2 text-sm text-zinc-400", "style": "display:none"},
             _SPINNER_SVG,
             "executing…",
         ),
         Div(
             data.show("!$executing && $last_status === 'ok'"),
             {
-                "class": "fixed bottom-4 left-60 flex items-center gap-2 text-sm text-green-400"
+                "class": "fixed bottom-4 left-60 flex items-center gap-2 text-sm text-green-400",
+                "style": "display:none",
             },
             "✓ done",
         ),
         Div(
             data.show("!$executing && $last_status === 'error'"),
             {
-                "class": "fixed bottom-4 left-60 flex items-center gap-2 text-sm text-red-400"
+                "class": "fixed bottom-4 left-60 flex items-center gap-2 text-sm text-red-400",
+                "style": "display:none",
             },
             "✗ error",
         ),
@@ -405,6 +408,7 @@ def _collapsible_text(output: str, base_class: str, id_attr: dict):
         # Expanded view
         Div(
             data.show(f"!${sig}"),
+            {"style": "display:none"},
             Pre(
                 {"class": base_class + " font-mono text-sm whitespace-pre-wrap break-words"},
                 SafeString(ansi_to_html(output)),
@@ -631,6 +635,7 @@ def variables_panel():
             "id": "vars-panel",
             "class": "fixed right-0 top-12 w-72 h-[calc(100vh-3rem)] bg-zinc-900 "
             "border-l border-zinc-800 overflow-y-auto z-30",
+            "style": "display:none",
         },
         Div(
             {"class": "p-4"},
