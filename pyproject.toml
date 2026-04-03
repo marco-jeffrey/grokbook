@@ -1,5 +1,5 @@
 [project]
-name = "nb-staroid"
+name = "grokbook"
 version = "0.1.0"
 description = "Lightweight notebook server with IPython kernel integration"
 readme = "README.md"
@@ -18,4 +18,4 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-stario = { path = "stario", editable = true }
+stario = { git = "https://github.com/Bobowski/stario.git", rev = "fd0cfae3baac78971dbf2c1f9be5a2967cd47751" }

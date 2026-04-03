@@ -67,7 +67,7 @@ def header_bar():
         },
         Div(
             {"class": "flex items-center gap-3"},
-            Span({"class": "text-sm font-semibold text-zinc-300"}, "nb-staroid"),
+            Span({"class": "text-sm font-semibold text-zinc-300"}, "grokbook"),
             Div(
                 {"class": "flex items-center gap-1.5 ml-4"},
                 Div(
@@ -858,7 +858,7 @@ def page(
         Head(
             Meta({"charset": "utf-8"}),
             Meta({"name": "viewport", "content": "width=device-width, initial-scale=1"}),
-            Title(f"{nb.name} — nb-staroid"),
+            Title(f"{nb.name} — grokbook"),
             Script({"src": "https://cdn.tailwindcss.com?plugins=typography"}),
             DatastarScript(),
             SafeString(

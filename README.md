@@ -1,4 +1,4 @@
-# nb-staroid
+# grokbook
 
 A lightweight, reactive notebook server built on [Stario](stario/) and [Datastar](https://data-star.dev). Runs IPython kernels, persists to SQLite, streams output over SSE. No npm, no webpack, no build step.
 
@@ -7,8 +7,8 @@ A lightweight, reactive notebook server built on [Stario](stario/) and [Datastar
 Requires **Python 3.14+** and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone https://github.com/your-user/nb-staroid.git
-cd nb-staroid
+git clone https://github.com/your-user/grokbook.git
+cd grokbook
 uv sync
 uv run python main.py
 ```
@@ -24,8 +24,8 @@ Create a separate environment with your favorite libraries, then point the serve
 mkdir /tmp/my-env && cd /tmp/my-env
 uv init && uv add pandas numpy matplotlib ipykernel
 
-# Start nb-staroid using that env for kernels
-cd /path/to/nb-staroid
+# Start grokbook using that env for kernels
+cd /path/to/grokbook
 uv run python main.py --python /tmp/my-env/.venv/bin/python
 ```
 
@@ -72,10 +72,7 @@ uv run python main.py --python /tmp/my-env/.venv/bin/python
 
 **APIs**
 
-Three programmatic interfaces, all running from the same server:
-
 - **REST API** at `/api` — CRUD for notebooks, cells, and kernel operations
-- **OpenAI-compatible endpoint** at `/v1/chat/completions` — tool-calling interface for LLM agents
 - **MCP server** (`mcp_server.py`) — Model Context Protocol for Claude Desktop, Cursor, etc.
 
 ## Architecture
@@ -120,7 +117,7 @@ uv run python mcp_server.py --host 0.0.0.0 --port 8081
 uv run python mcp_server.py
 ```
 
-Set `NB_STAROID_API_URL` to point at a running nb-staroid instance (default: `http://localhost:8080/api`).
+Set `GROKBOOK_API_URL` to point at a running grokbook instance (default: `http://localhost:8080/api`).
 
 **Available tools**: `list_notebooks`, `get_notebook`, `create_notebook`, `rename_notebook`, `duplicate_notebook`, `delete_notebook`, `create_cell`, `read_cell`, `write_cell`, `delete_cell`, `move_cell`, `duplicate_cell`, `execute_cell`, `kernel_status`, `restart_kernel`
 
@@ -135,7 +132,6 @@ app/
   kernel.py          KernelManager, KernelPool, variable inspection
   db.py              SQLite database, schema migrations
   api.py             REST API routes
-  openai.py          OpenAI-compatible endpoint
   ipynb.py           Import/export Jupyter .ipynb
   state.py           Notebook, Cell dataclasses
   static/js/app.js   Client-side keyboard shortcuts, autocomplete, autosave
