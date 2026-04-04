@@ -135,11 +135,37 @@ class KernelManager:
                     return
 
     @staticmethod
+    def _process_cr(text: str) -> str:
+        """Simulate terminal carriage-return behavior.
+
+        When \\r appears mid-line, the text after it overwrites the line
+        from the beginning — this is how tqdm progress bars work.
+        We process this so HTML <pre> output looks correct.
+        """
+        lines = text.split("\n")
+        result = []
+        for line in lines:
+            if "\r" in line:
+                # Split by \r, each segment overwrites from column 0
+                segments = line.split("\r")
+                # Start with empty line, apply each segment as an overwrite
+                buf = ""
+                for seg in segments:
+                    if seg:
+                        # Overwrite from position 0, keep any trailing chars
+                        buf = seg + buf[len(seg):]
+                result.append(buf)
+            else:
+                result.append(line)
+        return "\n".join(result)
+
+    @staticmethod
     def _blocks_to_output(blocks: list[dict], has_rich: bool) -> str:
         if not blocks:
             return ""
         if not has_rich:
-            return "".join(b["data"] for b in blocks)
+            raw = "".join(b["data"] for b in blocks)
+            return KernelManager._process_cr(raw)
         return json.dumps(blocks)
 
     _VARS_SNIPPET = (

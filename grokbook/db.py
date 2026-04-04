@@ -2,7 +2,7 @@ import logging
 
 import aiosqlite
 
-from app.state import Cell, Notebook, Project
+from grokbook.state import Cell, Notebook, Project
 
 log = logging.getLogger(__name__)
 

@@ -5,9 +5,9 @@ from stario import Relay
 from stario.http import Router
 from stario.http.types import Context, Writer
 
-from app.db import Database
-from app.kernel import KernelPool
-from app.state import Cell, Notebook, Project
+from grokbook.db import Database
+from grokbook.kernel import KernelPool
+from grokbook.state import Cell, Notebook, Project
 
 
 def _serialize_cell(cell: Cell) -> dict:

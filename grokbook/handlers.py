@@ -6,10 +6,10 @@ from stario.datastar.signals import get_signals
 from stario.http import Router
 from stario.http.types import Context, Writer
 
-from app.db import Database
-from app.ipynb import export_ipynb, import_ipynb
-from app.kernel import KernelPool
-from app.views import _render_output, notebook, page, sidebar_view
+from grokbook.db import Database
+from grokbook.ipynb import export_ipynb, import_ipynb
+from grokbook.kernel import KernelPool
+from grokbook.views import _render_output, notebook, page, sidebar_view
 
 
 def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:

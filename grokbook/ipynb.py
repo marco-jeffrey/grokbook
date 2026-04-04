@@ -3,8 +3,8 @@
 import json
 import re
 
-from app.db import Database
-from app.state import Cell, Notebook
+from grokbook.db import Database
+from grokbook.state import Cell, Notebook
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[mK]")
 

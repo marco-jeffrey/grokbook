@@ -1,11 +1,11 @@
 [project]
 name = "grokbook"
 version = "0.1.0"
-description = "Lightweight notebook server with IPython kernel integration"
+description = "Interactive notebook server for learning computer science"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.14"
-keywords = ["notebook", "jupyter", "ipython", "datastar", "sse", "reactive"]
+requires-python = ">=3.12"
+keywords = ["notebook", "jupyter", "ipython", "datastar", "sse", "reactive", "education"]
 dependencies = [
     "stario",
     "jupyter-client>=8.0.0",
@@ -15,7 +15,22 @@ dependencies = [
     "markdown-it-py[linkify,plugins]>=4.0.0",
     "fastmcp>=3.1.1",
     "httpx>=0.28.1",
+    "tqdm>=4.67.3",
+    "typer>=0.15.0",
 ]
+
+[project.scripts]
+grokbook = "grokbook.cli:app"
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["grokbook*"]
+
+[tool.setuptools.package-data]
+grokbook = ["static/**/*"]
 
 [tool.uv.sources]
 stario = { git = "https://github.com/Bobowski/stario.git", rev = "fd0cfae3baac78971dbf2c1f9be5a2967cd47751" }

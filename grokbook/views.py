@@ -24,8 +24,8 @@ from stario.html import (
 
 from stario import UrlFor
 
-from app.ansi import ansi_to_html
-from app.state import Cell, Notebook, Project
+from grokbook.ansi import ansi_to_html
+from grokbook.state import Cell, Notebook, Project
 
 _md = MarkdownIt("gfm-like")
 
@@ -615,7 +615,7 @@ def _render_output(output: str, is_error: bool, cell_id: int | None = None):
         return Div(id_attr) if cell_id else SafeString("")
 
     base_class = (
-        "mt-2 rounded-lg border p-4 "
+        "mt-2 rounded-lg border p-4 overflow-x-auto "
         + ("border-red-900 bg-red-950 text-red-300" if is_error
            else "border-zinc-700 bg-zinc-900 text-emerald-300")
     )
@@ -866,6 +866,13 @@ def page(
                 ".light-mode { filter: invert(1) hue-rotate(180deg); }"
                 ".light-mode img, .light-mode svg, .light-mode video, "
                 ".light-mode [data-no-invert] { filter: invert(1) hue-rotate(180deg); }"
+                "/* Pandas DataFrame tables */"
+                ".dataframe { width: auto !important; border-collapse: collapse; font-size: 0.8125rem; font-family: ui-monospace, monospace; }"
+                ".dataframe th, .dataframe td { padding: 0.25rem 0.625rem; border: none; border-bottom: 1px solid #27272a; text-align: right; white-space: nowrap; }"
+                ".dataframe td:first-child, .dataframe th:first-child { text-align: left; }"
+                ".dataframe thead th { color: #a1a1aa; font-weight: 500; border-bottom: 1px solid #3f3f46; padding-bottom: 0.375rem; }"
+                ".dataframe tbody th { color: #52525b; font-weight: 400; }"
+                ".dataframe tbody tr:hover { background: #18181b; }"
                 "</style>"
             ),
             Script(SafeString(
