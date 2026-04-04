@@ -755,7 +755,8 @@ def _markdown_cell_view(cell: Cell):
                 "dblclick",
                 f"document.getElementById('md-edit-{cell.id}').classList.remove('hidden');"
                 f"document.getElementById('md-display-{cell.id}').classList.add('hidden');"
-                f"document.querySelector('#md-edit-{cell.id} textarea').focus()",
+                f"var _ta=document.querySelector('#md-edit-{cell.id} textarea');"
+                f"_ta.focus();_ta.style.height='auto';_ta.style.height=_ta.scrollHeight+'px'",
             ),
             SafeString(rendered),
         ),
