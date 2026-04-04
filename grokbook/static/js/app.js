@@ -96,22 +96,43 @@
     }
   }
 
+  var _pendingFocusCell = null;
+
   function focusNextCell(currentCellId) {
     var ids = getAllCellIds();
     var idx = ids.indexOf(currentCellId);
     if (idx === -1 || idx >= ids.length - 1) return;
     var nextId = ids[idx + 1];
     _selectedCellId = nextId;
-    // Small delay to let any DOM updates settle
-    setTimeout(function () {
-      var cm = window._cmEditors.get(nextId);
-      if (cm) {
-        cm.focus();
-      } else {
-        var ta = document.querySelector('textarea[data-cell-id="' + nextId + '"]');
-        if (ta) ta.focus();
-      }
-    }, 50);
+    _pendingFocusCell = nextId;
+    // Try immediately — works when DOM isn't being re-patched
+    setTimeout(function () { _tryFocusCell(nextId); }, 50);
+  }
+
+  function _tryFocusCell(cellId) {
+    var cm = window._cmEditors.get(cellId);
+    if (cm) {
+      cm.focus();
+      _pendingFocusCell = null;
+      selectCell(cellId);
+      return true;
+    }
+    var ta = document.querySelector('textarea[data-cell-id="' + cellId + '"]');
+    if (ta && !ta.classList.contains('hidden') && !ta.closest('.hidden')) {
+      ta.focus();
+      _pendingFocusCell = null;
+      selectCell(cellId);
+      return true;
+    }
+    // For markdown cells in display mode, just select (don't enter edit)
+    var container = document.querySelector('[data-cell-container="' + cellId + '"]');
+    if (container) {
+      _pendingFocusCell = null;
+      _mode = 'command';
+      selectCell(cellId);
+      return true;
+    }
+    return false;
   }
 
   // fire-and-forget POST
@@ -326,12 +347,14 @@
 
   // Watch for DOM changes (SSE patches recreate cells)
   new MutationObserver(function () {
-    var restoreId = _focusedCellId;
+    var restoreId = _pendingFocusCell || _focusedCellId;
     cleanupOrphanedEditors();
     initCodeEditors();
     resizeMarkdownTextareas();
-    // Restore focus after re-patch
-    if (restoreId && _mode === 'edit') {
+    // Focus pending cell (Shift+Enter jump) or restore previous focus
+    if (_pendingFocusCell) {
+      setTimeout(function () { _tryFocusCell(_pendingFocusCell); }, 10);
+    } else if (restoreId && _mode === 'edit') {
       setTimeout(function () {
         var cm = window._cmEditors.get(restoreId);
         if (cm) { cm.focus(); return; }
