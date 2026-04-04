@@ -39,15 +39,20 @@
   }
 
   function selectCell(cellId) {
-    document.querySelectorAll('[data-cell-container]').forEach(function (el) {
-      el.classList.remove('ring-2', 'ring-indigo-500/50', 'rounded-lg');
+    // Remove selection ring from all editor elements
+    document.querySelectorAll('[data-cell-container] [data-cell-id], [data-cell-container] [id^="md-display-"]').forEach(function (el) {
+      el.classList.remove('ring-2', 'ring-indigo-500/50');
     });
     _selectedCellId = cellId;
     if (cellId) {
-      var el = document.querySelector('[data-cell-container="' + cellId + '"]');
-      if (el) {
-        el.classList.add('ring-2', 'ring-indigo-500/50', 'rounded-lg');
-        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      var container = document.querySelector('[data-cell-container="' + cellId + '"]');
+      if (container) {
+        // Ring the editor or markdown display, not the outer container
+        var target = container.querySelector('[data-cell-id]') || container.querySelector('[id^="md-display-"]');
+        if (target) {
+          target.classList.add('ring-2', 'ring-indigo-500/50');
+        }
+        container.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       }
     }
   }

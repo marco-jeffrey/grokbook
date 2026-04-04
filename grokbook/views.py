@@ -763,7 +763,7 @@ def _markdown_cell_view(cell: Cell):
         Div(
             {
                 "id": f"md-edit-{cell.id}",
-                "class": "hidden ml-[4.5rem]",
+                "class": "hidden",
             },
             Textarea(
                 cell.input,
