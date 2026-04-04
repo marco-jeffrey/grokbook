@@ -8,12 +8,15 @@ _CELLS = [
         """\
 # Welcome to Grokbook
 
-Grokbook is an interactive notebook for learning computer science. It works just like Jupyter — write code and markdown in cells, run them, and see results instantly.
+Grokbook is an interactive notebook for learning computer science — like Jupyter, but with a built-in **MCP server** that lets AI assistants create and manage notebooks for you.
 
-**How it works:**
-- **Code cells** run Python in a persistent kernel (variables carry over between cells)
-- **Markdown cells** render rich text for explanations and notes
-- Each notebook has its own kernel — restart it anytime for a clean slate\
+**The idea:** connect Claude (or any MCP-compatible LLM) and just say what you want to learn. The AI will generate full notebooks with explanations, runnable code, and exercises — then help you when you get stuck.
+
+- *"Teach me how recursion works"* — get a complete lesson with examples you can run
+- *"I don't understand why my sort is wrong"* — the AI reads your notebook and guides you to the fix
+- *"Give me 5 practice problems on linked lists"* — runnable exercises with starter code
+
+Notebooks work like Jupyter: **code cells** run Python in a persistent kernel (variables carry over), **markdown cells** render rich text. Each notebook gets its own kernel.\
 """,
     ),
     (
@@ -91,12 +94,33 @@ print(f"Its circumference is {2 * math.pi * radius:.2f}")\
     (
         "markdown",
         """\
+## Connecting an AI Tutor
+
+Paste this into **Claude Desktop** or **Claude Code** settings to connect:
+
+```json
+{
+  "mcpServers": {
+    "grokbook": {
+      "command": "grokbook",
+      "args": ["mcp", "--allow-code-execution"]
+    }
+  }
+}
+```
+
+Once connected, just tell the AI what you want to learn. It will create notebooks, write and run code, and teach you interactively.\
+""",
+    ),
+    (
+        "markdown",
+        """\
 ## What Next?
 
-- Create a new notebook from the sidebar
-- Use the **MCP integration** to have an AI tutor help you learn
-- Import existing `.ipynb` notebooks from Jupyter
-- Click **Vars** in the top bar to inspect kernel variables
+- **Create a notebook** from the sidebar
+- **Import** existing `.ipynb` notebooks from Jupyter
+- **Inspect variables** with the **Vars** button in the top bar
+- **Toggle Vim mode** from the settings panel (gear icon) — `jk` maps to Escape
 
 Happy learning!\
 """,

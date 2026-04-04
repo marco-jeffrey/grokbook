@@ -4,7 +4,7 @@ Interactive notebook server for learning computer science. Works like Jupyter â€
 
 ## Install
 
-Requires **Python 3.12+** and [uv](https://docs.astral.sh/uv/).
+Requires **Python 3.14+** and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 git clone https://github.com/marco-jeffrey/grokbook.git

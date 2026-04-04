@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Interactive notebook server for learning computer science"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 keywords = ["notebook", "jupyter", "ipython", "datastar", "sse", "reactive", "education"]
 dependencies = [
     "stario",
