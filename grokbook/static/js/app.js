@@ -40,15 +40,15 @@
 
   function selectCell(cellId) {
     // Remove selection ring from all editor elements
-    document.querySelectorAll('[data-cell-container] [data-cell-id], [data-cell-container] [id^="md-display-"]').forEach(function (el) {
+    document.querySelectorAll('[data-cell-container] [data-cell-type], [data-cell-container] [id^="md-display-"]').forEach(function (el) {
       el.classList.remove('ring-2', 'ring-indigo-500/50');
     });
     _selectedCellId = cellId;
     if (cellId) {
       var container = document.querySelector('[data-cell-container="' + cellId + '"]');
       if (container) {
-        // Ring the editor or markdown display, not the outer container
-        var target = container.querySelector('[data-cell-id]') || container.querySelector('[id^="md-display-"]');
+        // Ring the markdown display or code editor, not the outer container
+        var target = container.querySelector('[id^="md-display-"]') || container.querySelector('[data-cell-type]');
         if (target) {
           target.classList.add('ring-2', 'ring-indigo-500/50');
         }
