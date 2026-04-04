@@ -7,7 +7,7 @@ Interactive notebook server for learning computer science. Works like Jupyter â€
 Requires **Python 3.12+** and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone https://github.com/Bobowski/grokbook.git
+git clone https://github.com/marco-jeffrey/grokbook.git
 cd grokbook
 uv sync
 ```
@@ -58,9 +58,6 @@ grokbook serve [OPTIONS]          # Start notebook + MCP servers
   --allow-code-execution          # Enable execute/kernel tools in MCP
 
 grokbook mcp [OPTIONS]            # MCP server standalone (stdio, for Claude Desktop)
-  --host TEXT                     # Use HTTP transport instead of stdio
-  --port, -p INT                  # HTTP port (default: 8081)
-  --api-url TEXT                  # API URL (default: http://localhost:8080/api)
   --allow-code-execution          # Enable execute/kernel tools
 ```
 
@@ -90,16 +87,10 @@ The `grokbook mcp` command runs in stdio mode for Claude Desktop. For HTTP-based
 
 **With `--allow-code-execution`**: `execute_cell`, `run_all_cells`, `kernel_status`, `restart_kernel`, `get_variables`, `interrupt_kernel`
 
-To enable code execution via MCP, start with:
+To enable code execution via MCP:
 
 ```bash
 grokbook serve --allow-code-execution
-```
-
-Or for the standalone MCP server:
-
-```bash
-grokbook mcp --allow-code-execution
 ```
 
 ## Features
