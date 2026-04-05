@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -45,12 +46,48 @@ def _print_banner(
     typer.echo(f"  Database: {db_path}")
     typer.echo()
 
-    # MCP config block — ready to copy-paste
+    # MCP config block — ready to copy-paste. Prefer an absolute path so
+    # the MCP client (Claude Desktop, etc.) can find it with a minimal PATH.
+    def _resolve_binary(name: str) -> str | None:
+        p = shutil.which(name)
+        if p:
+            return p
+        # Claude Desktop / launchd PATHs are usually minimal, so check
+        # common install locations.
+        candidates = [
+            Path.home() / ".local" / "bin" / name,
+            Path("/usr/local/bin") / name,
+            Path("/opt/homebrew/bin") / name,
+        ]
+        for c in candidates:
+            if c.exists():
+                return str(c)
+        return None
+
+    grokbook_bin = _resolve_binary("grokbook")
+    uvx_bin = _resolve_binary("uvx")
+    uv_bin = _resolve_binary("uv")
+    if grokbook_bin and "/.cache/uv/" not in grokbook_bin:
+        # Installed via `uv tool install grokbook` (or pip) — stable path.
+        command = grokbook_bin
+        args = ["mcp", "--allow-code-execution"]
+    elif uvx_bin:
+        # uvx available — self-installing, zero setup for the user.
+        command = uvx_bin
+        args = ["grokbook", "mcp", "--allow-code-execution"]
+    elif uv_bin:
+        command = uv_bin
+        args = ["tool", "run", "grokbook", "mcp", "--allow-code-execution"]
+    else:
+        # Last resort: whatever is on PATH when the MCP client launches us.
+        command = "grokbook"
+        args = ["mcp", "--allow-code-execution"]
+
     mcp_config = {
         "mcpServers": {
             "grokbook": {
-                "command": "grokbook",
-                "args": ["mcp", "--allow-code-execution"],
+                "command": command,
+                "args": args,
                 "env": {"GROKBOOK_API_URL": f"http://localhost:{port}/api"},
             }
         }
