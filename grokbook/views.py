@@ -648,8 +648,15 @@ def _cell_toolbar(cell: Cell):
         "px-1.5 py-0.5 rounded text-zinc-600 hover:text-zinc-200 "
         "hover:bg-zinc-700 transition-colors cursor-pointer text-xs"
     )
+    type_label = "MD" if cell.cell_type == "code" else "PY"
+    type_title = "Convert to markdown" if cell.cell_type == "code" else "Convert to code"
     return Div(
         {"class": "opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 mb-1 justify-end"},
+        Button(
+            data.on("click", at.post(f"/cells/convert/{cell.id}")),
+            {"class": btn + " font-mono", "title": type_title},
+            f"→ {type_label}",
+        ),
         Button(data.on("click", at.post(f"/cells/move-up/{cell.id}")), {"class": btn, "title": "Move up"}, "▲"),
         Button(data.on("click", at.post(f"/cells/move-down/{cell.id}")), {"class": btn, "title": "Move down"}, "▼"),
         Button(data.on("click", at.post(f"/cells/duplicate/{cell.id}")), {"class": btn, "title": "Duplicate"}, "⊕"),
