@@ -143,7 +143,29 @@ def mcp(
 
 
 @app.callback(invoke_without_command=True)
-def main(ctx: typer.Context) -> None:
-    """Interactive notebook server for learning computer science."""
+def main(
+    ctx: typer.Context,
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address for both servers"),
+    port: int = typer.Option(8080, "--port", "-p", help="Notebook server port"),
+    mcp_port: int = typer.Option(8081, "--mcp-port", help="MCP server port"),
+    python: str | None = typer.Option(None, "--python", help="Python interpreter for kernels"),
+    db: Path | None = typer.Option(None, "--db", help="Database file path"),
+    allow_code_execution: bool = typer.Option(
+        False, "--allow-code-execution",
+        help="Enable code execution tools in the MCP server",
+    ),
+) -> None:
+    """Interactive notebook server for learning computer science.
+
+    Running `grokbook` with no subcommand is equivalent to `grokbook serve`.
+    """
     if ctx.invoked_subcommand is None:
-        ctx.invoke(serve)
+        ctx.invoke(
+            serve,
+            host=host,
+            port=port,
+            mcp_port=mcp_port,
+            python=python,
+            db=db,
+            allow_code_execution=allow_code_execution,
+        )

@@ -4,34 +4,60 @@ Interactive notebook server for learning computer science. Works like Jupyter �
 
 ## Install
 
-Requires **Python 3.14+** and [uv](https://docs.astral.sh/uv/).
+Requires **Python 3.14+** and [uv](https://docs.astral.sh/uv/). uv will auto-install Python 3.14 if you don't have it.
+
+### Run instantly (recommended)
+
+```bash
+cd your-project/          # a dir with .venv, pyproject.toml, etc.
+uvx grokbook
+```
+
+That's it. Opens the notebook UI on [localhost:8080](http://localhost:8080) and the MCP server on port 8081. Grokbook auto-detects your project's `.venv` as the kernel and installs `ipykernel` into it if needed. A welcome notebook is created on first run.
+
+### Install permanently
+
+```bash
+uv tool install grokbook
+grokbook                   # now on your PATH
+```
+
+### From source (dev)
 
 ```bash
 git clone https://github.com/marco-jeffrey/grokbook.git
 cd grokbook
 uv sync
+uv run grokbook
 ```
 
 ## Usage
 
 ```bash
-grokbook
+uvx grokbook               # or just `grokbook` after uv tool install
 ```
 
-That's it. Opens the notebook UI on [localhost:8080](http://localhost:8080) and the MCP server on port 8081. A welcome notebook is created on first run.
-
-### Custom kernel environment
-
-By default, grokbook uses its own Python for the kernel. To use a separate environment with your libraries:
+Flags:
 
 ```bash
-# Create an env with your packages
-mkdir /tmp/my-env && cd /tmp/my-env
-uv init && uv add pandas numpy matplotlib ipykernel
-
-# Start grokbook with that env
-grokbook serve --python /tmp/my-env/.venv/bin/python
+uvx grokbook --port 3000                      # different port
+uvx grokbook --python /path/to/python         # explicit kernel interpreter
+uvx grokbook --allow-code-execution           # enable execute tools for MCP
 ```
+
+### Kernel auto-detection
+
+Grokbook picks a Python interpreter on startup in this order:
+
+1. `--python` CLI flag (explicit override)
+2. `$VIRTUAL_ENV` (if an env is active in your shell)
+3. `./.venv/bin/python` or `./venv/bin/python` in the current directory
+4. First `uv`-managed Python found via `uv python list`
+5. Fallback to the Python grokbook is running under
+
+If the chosen interpreter is missing `ipykernel`, grokbook installs it automatically via `uv pip install --python <env> ipykernel`.
+
+You can also **switch kernels per-notebook** from the UI: click the `kernel:` dropdown in the header → pick any discovered env, or paste a custom path at the bottom. Custom paths persist in `~/.grokbook/custom_envs.json`.
 
 ### Remote access (Tailscale / LAN)
 
@@ -48,8 +74,8 @@ Both the notebook server and MCP server bind to all interfaces. Access from anot
 ### CLI reference
 
 ```
-grokbook                          # Start everything (default)
-grokbook serve [OPTIONS]          # Start notebook + MCP servers
+grokbook [OPTIONS]                # Start notebook + MCP servers (= grokbook serve)
+grokbook serve [OPTIONS]          # (explicit form)
   --host TEXT                     # Bind address (default: 127.0.0.1)
   --port, -p INT                  # Notebook server port (default: 8080)
   --mcp-port INT                  # MCP server port (default: 8081)
@@ -98,6 +124,7 @@ grokbook serve --allow-code-execution
 - **Code cells** with streaming execution, rich output (images, HTML, SVG, pandas tables)
 - **Markdown cells** with GitHub-flavored rendering
 - **Persistent IPython kernels** — one per notebook, variables carry over between cells
+- **Per-notebook kernel picker** — auto-discovers `uv`, `.venv`, and jupyter kernelspecs; install `ipykernel` into any env with one click
 - **Keyboard-driven** — Vim-like command/edit modes (j/k, a/b, dd, Shift+Enter)
 - **Import/export** Jupyter `.ipynb` files
 - **Variables inspector** panel
