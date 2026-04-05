@@ -2,6 +2,10 @@
 
 Interactive notebook server for learning computer science. Works like Jupyter — code cells, markdown, persistent IPython kernels — with a built-in MCP server so AI tutors can create and manage notebooks for you.
 
+![grokbook screenshot](grokbook.png)
+
+> **Hey, can you create a new project in Grokbook about LLMs and transformer architecture, and a first notebook to teach me about the attention mechanism in PyTorch? Go step by step, introduce the different components of attention, and use both markdown and code to give me a comprehensive intro.**
+
 ## Install
 
 Requires **Python 3.14+** and [uv](https://docs.astral.sh/uv/). uv will auto-install Python 3.14 if you don't have it.
