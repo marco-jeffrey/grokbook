@@ -5,7 +5,7 @@ description = "Interactive notebook server for learning computer science"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.14"
-authors = [{ name = "Marco Jeffrey Pansa", email = "TODO@example.com" }]
+authors = [{ name = "Marco Jeffrey Pansa", email = "marco-jeffrey@users.noreply.github.com" }]
 keywords = ["notebook", "jupyter", "ipython", "datastar", "sse", "reactive", "education"]
 classifiers = [
     "Development Status :: 4 - Beta",
