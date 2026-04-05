@@ -74,10 +74,20 @@
     var cm = window._cmEditors.get(cellId);
     if (cm) {
       cm.focus();
-    } else {
-      // Markdown cell — find textarea
-      var ta = document.querySelector('textarea[data-cell-id="' + cellId + '"]');
-      if (ta) ta.focus();
+      return;
+    }
+    // Markdown cell — reveal edit view, hide display, auto-resize, focus
+    var editDiv = document.getElementById('md-edit-' + cellId);
+    var displayDiv = document.getElementById('md-display-' + cellId);
+    if (editDiv && displayDiv) {
+      editDiv.classList.remove('hidden');
+      displayDiv.classList.add('hidden');
+      var ta = editDiv.querySelector('textarea');
+      if (ta) {
+        ta.style.height = 'auto';
+        ta.style.height = ta.scrollHeight + 'px';
+        ta.focus();
+      }
     }
   }
 
@@ -497,6 +507,11 @@
       if (key === 'k' || key === 'ArrowUp') {
         e.preventDefault();
         selectAdjacentCell(-1);
+        return;
+      }
+      if (key === 'Enter' && e.shiftKey && _selectedCellId) {
+        e.preventDefault();
+        selectAdjacentCell(1);
         return;
       }
       if (key === 'Enter' && _selectedCellId) {
