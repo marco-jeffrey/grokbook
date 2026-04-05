@@ -100,8 +100,8 @@ On startup, grokbook prints an MCP config block you can paste directly into Clau
 {
   "mcpServers": {
     "grokbook": {
-      "command": "grokbook",
-      "args": ["mcp", "--allow-code-execution"],
+      "command": "uvx",
+      "args": ["grokbook", "mcp", "--allow-code-execution"],
       "env": {
         "GROKBOOK_API_URL": "http://localhost:8080/api"
       }
