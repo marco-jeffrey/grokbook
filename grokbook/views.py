@@ -25,6 +25,7 @@ from stario.html import (
 from stario import UrlFor
 
 from grokbook.ansi import ansi_to_html
+from grokbook.envs import EnvInfo
 from grokbook.state import Cell, Notebook, Project
 
 _md = MarkdownIt("gfm-like")
@@ -59,7 +60,251 @@ def _settings_toggle(label: str, signal: str):
     )
 
 
-def header_bar():
+def _path_suggestions_view(suggestions: list[str]):
+    """Render the suggestions list (patched by /kernel/envs/complete)."""
+    if not suggestions:
+        return Div({"id": "path-suggestions"})
+    return Div(
+        {
+            "id": "path-suggestions",
+            "class": "max-h-40 overflow-y-auto border-t border-zinc-800 bg-zinc-950",
+        },
+        *[
+            Button(
+                data.on("click", f"$new_env_path = {json.dumps(s)}"),
+                {
+                    "class": (
+                        "w-full text-left px-3 py-1 text-[11px] font-mono text-zinc-400 "
+                        "hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer truncate block"
+                    ),
+                    "title": s,
+                },
+                s,
+            )
+            for s in suggestions
+        ],
+    )
+
+
+def _env_item(env: EnvInfo):
+    """A single row in the kernel dropdown."""
+    disabled = not env.has_ipykernel
+    if disabled:
+        # Clicking opens the install modal instead of switching
+        click_expr = f"$install_env_path = {json.dumps(env.path)}; $install_env_name = {json.dumps(env.name)}; $show_kernels = false"
+    else:
+        # Set signal + POST to /kernel/env/set (notebook_id + env_path carried via signals)
+        click_expr = (
+            f"$kernel_env = {json.dumps(env.path)}; "
+            f"$pending_env_path = {json.dumps(env.path)}; "
+            f"$show_kernels = false; "
+            f"@post('/kernel/env/set', {{filterSignals: {{include: '/^(notebook_id|pending_env_path)$/'}}}})"
+        )
+    tooltip = env.path + ("  (ipykernel not installed)" if disabled else "")
+    return Button(
+        data.on("click", click_expr),
+        {
+            "title": tooltip,
+            "class": (
+                "w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs "
+                "hover:bg-zinc-800 transition-colors cursor-pointer "
+                + ("opacity-70" if disabled else "")
+            ),
+        },
+        data.class_({
+            "bg-indigo-600/20": f"$kernel_env === {json.dumps(env.path)}",
+            "text-indigo-300": f"$kernel_env === {json.dumps(env.path)}",
+        }),
+        Span({"class": "font-mono text-zinc-500 w-4 shrink-0"}, env.label_glyph),
+        Span({"class": "truncate flex-1"}, env.name),
+        Span({"class": "font-mono text-zinc-500 text-[10px] shrink-0"}, f"py{env.version_str}"),
+        Span({"class": "text-yellow-500 text-[10px] shrink-0"}, "⚠") if disabled else SafeString(""),
+        Span(
+            data.on(
+                "click",
+                f"event.stopPropagation(); $remove_env_path = {json.dumps(env.path)}; "
+                f"@post('/kernel/envs/remove', {{filterSignals: {{include: '/^remove_env_path$/'}}}})",
+            ),
+            {
+                "class": "text-zinc-600 hover:text-red-400 text-[11px] shrink-0 cursor-pointer ml-1",
+                "title": "Remove custom env",
+            },
+            "✕",
+        ) if env.source == "custom" else SafeString(""),
+    )
+
+
+def kernel_selector(envs: list[EnvInfo]):
+    """Header dropdown for switching the notebook's Python kernel."""
+    return Div(
+        {"id": "kernel-selector", "class": "relative"},
+        data.signals({
+            "show_kernels": False,
+            "pending_env_path": "",
+            "new_env_path": "",
+            "new_env_error": "",
+            "remove_env_path": "",
+        }),
+        # outside-click on the selector wrapper closes the dropdown
+        data.on("click", "$show_kernels = false", outside=True),
+        Button(
+            data.on("click", "$show_kernels = !$show_kernels"),
+            data.attr("title", "$kernel_env || 'no kernel selected'"),
+            {
+                "class": (
+                    "flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 "
+                    "transition-colors cursor-pointer px-2 py-1 rounded border border-zinc-700 "
+                    "hover:border-zinc-500 font-mono"
+                ),
+            },
+            Span({"class": "text-zinc-500"}, "kernel:"),
+            Span(data.text("$kernel_env.split('/').pop() || 'default'")),
+            Span({"class": "text-zinc-600"}, "▾"),
+        ),
+        Div(
+            data.show("$show_kernels"),
+            {
+                "class": (
+                    "absolute left-0 top-full mt-1 bg-zinc-900 border border-zinc-700 "
+                    "rounded-md py-1 min-w-[320px] max-h-[400px] overflow-y-auto z-50 shadow-xl"
+                ),
+                "style": "display:none",
+            },
+            *[_env_item(env) for env in envs],
+            Div({"class": "border-t border-zinc-800 my-1"}),
+            # Add custom path row
+            Div(
+                {"class": "px-3 py-1.5 flex items-center gap-1"},
+                Input(
+                    data.bind("new_env_path"),
+                    data.on(
+                        "input",
+                        "@post('/kernel/envs/complete', {filterSignals: {include: '/^new_env_path$/'}})",
+                        debounce="150ms",
+                    ),
+                    data.on(
+                        "keydown",
+                        "if(event.key==='Enter'){event.preventDefault();"
+                        "@post('/kernel/envs/add', {filterSignals: {include: '/^new_env_path$/'}})}",
+                    ),
+                    {
+                        "type": "text",
+                        "placeholder": "/path/to/python",
+                        "spellcheck": "false",
+                        "autocomplete": "off",
+                        "class": (
+                            "flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 "
+                            "text-xs font-mono text-zinc-200 placeholder-zinc-600 "
+                            "focus:border-indigo-500 outline-none"
+                        ),
+                    },
+                ),
+                Button(
+                    data.on(
+                        "click",
+                        "@post('/kernel/envs/add', {filterSignals: {include: '/^new_env_path$/'}})",
+                    ),
+                    {
+                        "class": "px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 "
+                        "bg-zinc-800 hover:bg-zinc-700 rounded border border-zinc-700 cursor-pointer",
+                        "title": "Add Python interpreter",
+                    },
+                    "+",
+                ),
+            ),
+            # Suggestions list (populated by /kernel/envs/complete patches)
+            Div({"id": "path-suggestions"}),
+            Div(
+                data.show("$new_env_error !== ''"),
+                data.text("$new_env_error"),
+                {
+                    "class": "px-3 pb-1.5 text-[11px] text-red-400",
+                    "style": "display:none",
+                },
+            ),
+            Div({"class": "border-t border-zinc-800 my-1"}),
+            Button(
+                data.on("click", at.post("/kernel/envs/refresh") + "; $show_kernels = false"),
+                {
+                    "class": "w-full text-left px-3 py-1.5 text-xs text-zinc-500 "
+                    "hover:text-zinc-200 hover:bg-zinc-800 cursor-pointer",
+                },
+                "↻ Refresh",
+            ),
+        ),
+    )
+
+
+def install_modal():
+    """Modal shown when the user clicks an env without ipykernel installed.
+
+    Driven by signals:
+      $install_env_path — non-empty string opens the modal
+      $install_env_name — display name
+      $install_running  — installation in progress
+      $install_done     — installation finished
+    """
+    return Div(
+        {"id": "install-modal-wrap"},
+        data.show("$install_env_path !== ''"),
+        {
+            "class": "fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4",
+            "style": "display:none",
+        },
+        data.on("click", "if(!$install_running){$install_env_path='';$install_env_name='';$install_done=false;}", outside=False),
+        Div(
+            data.on("click", "event.stopPropagation()"),
+            {"class": "bg-zinc-900 border border-zinc-700 rounded-lg p-6 max-w-2xl w-full shadow-2xl"},
+            Span({"class": "block text-sm font-semibold text-zinc-200 mb-1"}, "Install ipykernel"),
+            Span(
+                {"class": "block text-xs text-zinc-500 mb-3 font-mono"},
+                data.text("$install_env_name"),
+            ),
+            Span(
+                {"class": "block text-xs text-zinc-400 mb-3"},
+                "This env doesn't have ",
+                Span({"class": "font-mono text-zinc-300"}, "ipykernel"),
+                " installed. Install it now? (runs ",
+                Span({"class": "font-mono text-zinc-300"}, "uv pip install --python <env> ipykernel"),
+                ")",
+            ),
+            Pre(
+                {
+                    "id": "install-log",
+                    "class": "bg-black p-2 font-mono text-[11px] max-h-64 overflow-auto text-zinc-300 whitespace-pre-wrap mb-3 rounded",
+                    "style": "display:none",
+                },
+                data.show("$install_running || $install_done"),
+            ),
+            Div(
+                {"class": "flex gap-2 justify-end"},
+                Button(
+                    data.on("click", "$install_env_path='';$install_env_name='';$install_done=false;$install_ok=false"),
+                    data.show("!$install_running"),
+                    {"class": "px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 rounded border border-zinc-700 hover:border-zinc-500 cursor-pointer"},
+                    "Close",
+                ),
+                Button(
+                    data.on(
+                        "click",
+                        "$install_done=false;$install_ok=false;"
+                        "@post('/kernel/env/install', {filterSignals: {include: '/^install_env_path$/'}})",
+                    ),
+                    data.show("!$install_running && !($install_done && $install_ok)"),
+                    {"class": "px-3 py-1.5 text-xs text-white bg-indigo-600 hover:bg-indigo-500 rounded cursor-pointer"},
+                    "Install",
+                ),
+                Button(
+                    {"class": "px-3 py-1.5 text-xs text-zinc-400 rounded border border-zinc-700 cursor-not-allowed"},
+                    data.show("$install_running"),
+                    "Installing…",
+                ),
+            ),
+        ),
+    )
+
+
+def header_bar(envs: list[EnvInfo] | None = None):
     return Div(
         {
             "class": "fixed top-0 left-0 right-0 h-12 bg-zinc-900 border-b border-zinc-800 "
@@ -87,6 +332,7 @@ def header_bar():
                     data.text("$kernel_state"),
                 ),
             ),
+            kernel_selector(envs or []),
         ),
         Div(
             {"class": "flex items-center gap-2"},
@@ -213,7 +459,10 @@ def _nb_item(nb: Notebook, active_id: int):
     return Div(
         {"class": "relative group mb-1"},
         Button(
-            data.on("click", at.post(f"/nb/switch/{nb.id}")),
+            data.on(
+                "click",
+                f"$notebook_id = {nb.id}; window.history.pushState(null,'','/nb/{nb.id}')",
+            ),
             {
                 "class": (
                     "block w-full text-left px-3 py-2 pr-8 rounded-md text-sm truncate "
@@ -865,6 +1114,7 @@ def page(
     notebooks_by_project: dict[int, list[Notebook]],
     cells: list[Cell],
     url_for: UrlFor,
+    envs: list[EnvInfo] | None = None,
 ):
     """Full HTML shell — only used for the initial GET /nb/{id}."""
     return Html(
@@ -916,6 +1166,13 @@ def page(
                     "last_status": "",
                     "focus_cell": "",
                     "kernel_state": "idle",
+                    "kernel_env": nb.kernel_env or "",
+                    "pending_env_path": "",
+                    "install_env_path": "",
+                    "install_env_name": "",
+                    "install_running": False,
+                    "install_done": False,
+                    "install_ok": False,
                     "show_vars": False,
                     "show_settings": False,
                     "wide_mode": False,
@@ -926,7 +1183,9 @@ def page(
                     **{f"proj_{p.id}_open": True for p in projects},
                 }
             ),
-            data.init(at.get("/events", retry_interval_ms=2000, retry_max_count=0)),
+            # Reconnect SSE whenever $notebook_id changes so the server-side
+            # stream's captured nb_id stays in sync with the client's view.
+            data.effect("$notebook_id; @get('/events', {retryInterval: 2000, retryMaxCount: 0})"),
             Span(
                 data.effect("document.body.dataset.notebookId=String($notebook_id)"),
                 {"style": "display:none"},
@@ -962,7 +1221,7 @@ def page(
                 ),
                 {"style": "display:none"},
             ),
-            header_bar(),
+            header_bar(envs or []),
             Div(
                 {"class": "flex pt-12"},
                 sidebar_view(nb.id, projects, notebooks_by_project),
@@ -973,6 +1232,7 @@ def page(
             ),
             execution_indicator(),
             variables_panel(),
+            install_modal(),
             Script({"src": url_for("static", "js/codemirror.js")}),
             Script({"src": url_for("static", "js/app.js")}),
         ),

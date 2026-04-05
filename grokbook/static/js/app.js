@@ -430,6 +430,16 @@
         d.classList.add('hidden');
       });
     }
+    // Single-click on rendered markdown selects (focuses) the cell without
+    // entering edit mode — dblclick still enters edit mode.
+    var mdDisplay = e.target.closest('[id^="md-display-"]');
+    if (mdDisplay) {
+      var container = mdDisplay.closest('[data-cell-container]');
+      if (container) {
+        _mode = 'command';
+        selectCell(container.dataset.cellContainer);
+      }
+    }
   });
 
   // ── indent / dedent for markdown textareas ─────────────────────────────

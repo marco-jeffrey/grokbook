@@ -2,18 +2,25 @@ import asyncio
 import time
 
 from stario import Relay
-from stario.datastar.signals import get_signals
+from stario.html import Div, Pre, SafeString
 from stario.http import Router
 from stario.http.types import Context, Writer
 
+from grokbook import envs
 from grokbook.db import Database
 from grokbook.ipynb import export_ipynb, import_ipynb
 from grokbook.kernel import KernelPool
-from grokbook.views import _render_output, notebook, page, sidebar_view
+from grokbook.views import _path_suggestions_view, _render_output, kernel_selector, notebook, page, sidebar_view
 
 
 def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router = Router()
+
+    async def _get_kernel(nb_id: int):
+        """Get or create the kernel for a notebook, using its stored kernel_env."""
+        nb = await db.get_notebook(nb_id)
+        env = nb.kernel_env if nb else None
+        return await pool.get(nb_id, env)
 
     # ── pages ─────────────────────────────────────────────────────────────
 
@@ -35,13 +42,15 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             return
         projects, notebooks_by_project = await _get_sidebar_data()
         cells = await db.get_all_cells(nb_id)
-        w.html(page(nb, projects, notebooks_by_project, cells, c.url_for))
+        if not envs.get_all():
+            await envs.refresh()
+        w.html(page(nb, projects, notebooks_by_project, cells, c.url_for, envs=envs.get_all()))
 
     # ── SSE live-push ───────────────────────────────────────────────────
 
     async def events(c: Context, w: Writer) -> None:
         """SSE endpoint — browser connects on page load for live updates."""
-        signals = await get_signals(c.req)
+        signals = await c.signals()
         nb_id = int(signals.get("notebook_id", 0))
         if not nb_id:
             w.empty(204)
@@ -50,8 +59,11 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         # Send initial state
         projects, notebooks_by_project = await _get_sidebar_data()
         cells = await db.get_all_cells(nb_id)
+        nb = await db.get_notebook(nb_id)
         w.patch(element=notebook(cells, nb_id), selector="#notebook")
         w.patch(element=sidebar_view(nb_id, projects, notebooks_by_project), selector="#sidebar")
+        # Sync kernel_env signal to match the (possibly different) notebook we're now viewing
+        w.sync({"kernel_env": (nb.kernel_env if nb else "") or ""})
 
         # Loop: wait for relay events, re-patch. Heartbeat every 15s
         # to prevent proxies/browsers from closing idle connections.
@@ -89,6 +101,10 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
                     if event_nb_id == nb_id:
                         cells = await db.get_all_cells(nb_id)
                         w.patch(element=notebook(cells, nb_id), selector="#notebook")
+                        # If this was a kernel env change in another tab, sync the signal
+                        if subject.endswith(".kernel_env_changed"):
+                            nb2 = await db.get_notebook(nb_id)
+                            w.sync({"kernel_env": (nb2.kernel_env if nb2 else "") or ""})
             finally:
                 if pending_next is not None:
                     pending_next.cancel()
@@ -100,27 +116,18 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     # ── notebook switching ────────────────────────────────────────────────
 
     async def _patch_all(w: Writer, nb_id: int) -> None:
-        """Patch notebook content + sidebar + sync notebook_id signal."""
-        projects, notebooks_by_project = await _get_sidebar_data()
-        cells = await db.get_all_cells(nb_id)
-        w.patch(element=notebook(cells, nb_id), selector="#notebook")
-        w.patch(element=sidebar_view(nb_id, projects, notebooks_by_project), selector="#sidebar")
-        w.sync({"notebook_id": nb_id, "last_status": "", "focus_cell": ""})
+        """Switch active notebook: sync signal + update URL.
 
-    async def switch_notebook(c: Context, w: Writer) -> None:
-        try:
-            nb_id = int(c.req.tail)
-        except ValueError:
-            w.text("Not Found", 404)
-            return
-        nb = await db.get_notebook(nb_id)
-        if not nb:
-            w.text("Not Found", 404)
-            return
-        await _patch_all(w, nb_id)
+        The client has a data-effect watching $notebook_id that reconnects
+        the /events SSE stream with the new id, which then pushes fresh
+        #notebook + #sidebar patches. So all we do here is flip the signal
+        and pushState the URL — no patching needed.
+        """
+        w.sync({"notebook_id": nb_id, "last_status": "", "focus_cell": ""})
+        w.execute(f"window.history.pushState(null,'','/nb/{nb_id}')")
 
     async def new_notebook(c: Context, w: Writer) -> None:
-        signals = await get_signals(c.req)
+        signals = await c.signals()
         project_id = int(signals.get("project_id", 1))
         nb_id = await db.create_notebook(project_id=project_id)
         await _patch_all(w, nb_id)
@@ -151,7 +158,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         )
 
     async def _get_active_id(c: Context) -> int:
-        signals = await get_signals(c.req)
+        signals = await c.signals()
         return int(signals.get("notebook_id", 0))
 
     async def nb_menu(c: Context, w: Writer) -> None:
@@ -170,7 +177,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
 
     async def nb_rename(c: Context, w: Writer) -> None:
         nb_id = int(c.req.tail)
-        signals = await get_signals(c.req)
+        signals = await c.signals()
         name = signals.get(f"rename_{nb_id}", "").strip()
         if name:
             await db.rename_notebook(nb_id, name)
@@ -222,7 +229,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
 
     async def project_rename(c: Context, w: Writer) -> None:
         project_id = int(c.req.tail)
-        signals = await get_signals(c.req)
+        signals = await c.signals()
         name = signals.get(f"proj_rename_{project_id}", "").strip()
         if name:
             await db.rename_project(project_id, name)
@@ -244,7 +251,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         w.patch(element=notebook(cells, nb_id), selector="#notebook")
 
     async def add_cell(c: Context, w: Writer) -> None:
-        signals = await get_signals(c.req)
+        signals = await c.signals()
         nb_id = int(signals.get("notebook_id", 0))
         new_id = await db.insert_cell(nb_id, cell_type="code")
         await _patch_notebook(w, nb_id)
@@ -252,7 +259,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         relay.publish(f"notebook.{nb_id}.cell_created", "cell")
 
     async def add_md_cell(c: Context, w: Writer) -> None:
-        signals = await get_signals(c.req)
+        signals = await c.signals()
         nb_id = int(signals.get("notebook_id", 0))
         await db.insert_cell(nb_id, cell_type="markdown")
         await _patch_notebook(w, nb_id)
@@ -265,7 +272,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         except ValueError:
             w.text("Not Found", 404)
             return
-        signals = await get_signals(c.req)
+        signals = await c.signals()
         code = signals.get(f"cell_{cell_id}", "")
         await db.update_input(cell_id, code)
         nb_id = await db.get_cell_notebook_id(cell_id)
@@ -275,7 +282,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
 
     async def _stream_execute(cell_id: int, nb_id: int, code: str, w: Writer) -> str:
         """Stream execution output to the browser, then save to DB."""
-        km = await pool.get(nb_id)
+        km = await _get_kernel(nb_id)
         output = ""
         is_error = False
         exec_count = 0
@@ -306,7 +313,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             w.text("Not Found", 404)
             return
 
-        signals = await get_signals(c.req)
+        signals = await c.signals()
         code = signals.get(f"cell_{cell_id}", "")
 
         # Shield so execution + DB write complete even if connection drops
@@ -459,7 +466,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         relay.publish(f"notebook.{nb_id}.cell_updated", "cell")
 
     async def clear_all_outputs(c: Context, w: Writer) -> None:
-        signals = await get_signals(c.req)
+        signals = await c.signals()
         nb_id = int(signals.get("notebook_id", 0))
         if not nb_id:
             w.empty(204)
@@ -471,13 +478,13 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     # ── run all ─────────────────────────────────────────────────────────
 
     async def run_all(c: Context, w: Writer) -> None:
-        signals = await get_signals(c.req)
+        signals = await c.signals()
         nb_id = int(signals.get("notebook_id", 0))
         if not nb_id:
             w.empty(204)
             return
         cells = await db.get_all_cells(nb_id)
-        km = await pool.get(nb_id)
+        km = await _get_kernel(nb_id)
 
         async def _run_all():
             for cell in cells:
@@ -511,23 +518,131 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         if not nb_id:
             w.json({"variables": []})
             return
-        km = await pool.get(nb_id)
+        km = await _get_kernel(nb_id)
         variables = await km.get_variables()
         w.json({"variables": variables})
 
     async def kernel_interrupt(c: Context, w: Writer) -> None:
-        signals = await get_signals(c.req)
+        signals = await c.signals()
         nb_id = int(signals.get("notebook_id", 0))
-        km = await pool.get(nb_id)
+        km = await _get_kernel(nb_id)
         await km.interrupt()
         w.sync({"executing": False})
 
     async def kernel_restart(c: Context, w: Writer) -> None:
-        signals = await get_signals(c.req)
+        signals = await c.signals()
         nb_id = int(signals.get("notebook_id", 0))
         await pool.restart(nb_id)
         w.sync({"kernel_state": "idle"})
         relay.publish(f"notebook.{nb_id}.kernel_restarted", "kernel")
+
+    # ── kernel env selection ──────────────────────────────────────────────
+
+    async def kernel_env_set(c: Context, w: Writer) -> None:
+        """POST /kernel/env/set — switch a notebook's python interpreter."""
+        signals = await c.signals()
+        nb_id = int(signals.get("notebook_id", 0))
+        env_path = signals.get("pending_env_path", "") or ""
+        if not nb_id:
+            w.json({"error": "missing notebook_id"}, 400)
+            return
+        env = envs.find_by_path(env_path) if env_path else None
+        if env_path and not env:
+            w.json({"error": f"unknown env: {env_path}"}, 400)
+            return
+        if env and not env.has_ipykernel:
+            w.json({"error": "ipykernel not installed in this env"}, 400)
+            return
+        # Persist and swap the kernel. The next cell execute will spawn a
+        # fresh kernel with the new interpreter.
+        await db.set_notebook_kernel_env(nb_id, env_path or None)
+        await pool.set_env(nb_id, env_path or None)
+        label = env.name if env else "default"
+        w.sync({"kernel_env": env_path, "kernel_state": "idle", "last_status": f"kernel → {label}"})
+        relay.publish(f"notebook.{nb_id}.kernel_env_changed", "kernel")
+
+    async def kernel_envs_refresh(c: Context, w: Writer) -> None:
+        """POST /kernel/envs/refresh — rescan envs and re-patch the selector."""
+        await envs.refresh()
+        w.patch(element=kernel_selector(envs.get_all()), selector="#kernel-selector")
+
+    async def kernel_envs_complete(c: Context, w: Writer) -> None:
+        """POST /kernel/envs/complete — path autocomplete suggestions."""
+        signals = await c.signals()
+        prefix = (signals.get("new_env_path", "") or "").strip()
+        suggestions = envs.complete_path(prefix)
+        w.patch(element=_path_suggestions_view(suggestions), selector="#path-suggestions")
+
+    async def kernel_envs_add_custom(c: Context, w: Writer) -> None:
+        """POST /kernel/envs/add — add a user-supplied python path."""
+        signals = await c.signals()
+        path = (signals.get("new_env_path", "") or "").strip()
+        if not path:
+            w.sync({"new_env_error": "path is required"})
+            return
+        env = await envs.add_custom_env(path)
+        if env is None:
+            w.sync({"new_env_error": f"not a valid Python interpreter: {path}"})
+            return
+        w.sync({"new_env_path": "", "new_env_error": ""})
+        w.patch(element=kernel_selector(envs.get_all()), selector="#kernel-selector")
+
+    async def kernel_envs_remove_custom(c: Context, w: Writer) -> None:
+        """POST /kernel/envs/remove — remove a custom env by path (tail)."""
+        signals = await c.signals()
+        path = (signals.get("remove_env_path", "") or "").strip()
+        if not path:
+            w.empty(204)
+            return
+        await envs.remove_custom_env(path)
+        w.patch(element=kernel_selector(envs.get_all()), selector="#kernel-selector")
+
+    async def kernel_env_install(c: Context, w: Writer) -> None:
+        """POST /kernel/env/install — install ipykernel into an env, stream log."""
+        signals = await c.signals()
+        env_path = signals.get("install_env_path", "") or ""
+        if not env_path:
+            w.json({"error": "missing install_env_path"}, 400)
+            return
+        w.sync({"install_running": True, "install_done": False, "install_ok": False})
+        # Reset log to empty
+        w.patch(
+            element=Pre(
+                {
+                    "id": "install-log",
+                    "class": "bg-black p-2 font-mono text-[11px] max-h-64 overflow-auto text-zinc-300 whitespace-pre-wrap mb-3 rounded",
+                },
+                "",
+            ),
+            selector="#install-log",
+        )
+        ok = False
+        async for kind, line in envs.install_ipykernel(env_path):
+            if kind == "done":
+                ok = line == "ok"
+                if not ok:
+                    w.patch(
+                        element=Div({"class": "text-red-400"}, f"\n✗ {line}\n"),
+                        selector="#install-log",
+                        mode="append",
+                    )
+                else:
+                    w.patch(
+                        element=Div({"class": "text-green-400"}, "\n✓ installed\n"),
+                        selector="#install-log",
+                        mode="append",
+                    )
+            else:
+                w.patch(
+                    element=Div(line + "\n"),
+                    selector="#install-log",
+                    mode="append",
+                )
+        if ok:
+            # Re-probe + update cache + re-render selector
+            await envs.refresh()
+            w.patch(element=kernel_selector(envs.get_all()), selector="#kernel-selector")
+        w.sync({"install_running": False, "install_done": True, "install_ok": ok})
 
     # ── autocomplete / inspect ────────────────────────────────────────────
 
@@ -537,7 +652,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         if not nb_id:
             w.json({"matches": [], "cursor_start": 0, "cursor_end": 0})
             return
-        km = await pool.get(nb_id)
+        km = await _get_kernel(nb_id)
         result = await km.complete(body.get("code", ""), body.get("cursor_pos", 0))
         w.json(result)
 
@@ -547,7 +662,7 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         if not nb_id:
             w.json({"text": ""})
             return
-        km = await pool.get(nb_id)
+        km = await _get_kernel(nb_id)
         text = await km.inspect(body.get("code", ""), body.get("cursor_pos", 0))
         w.json({"text": text})
 
@@ -590,7 +705,6 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router.get("/events", events)
     router.get("/nb/*", nb_page)
     router.post("/nb/new", new_notebook)
-    router.post("/nb/switch/*", switch_notebook)
     router.post("/nb/menu/*", nb_menu)
     router.post("/nb/menu-close", nb_menu_close)
     router.post("/nb/rename-mode/*", nb_rename_mode)
@@ -624,6 +738,12 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router.post("/kernel/interrupt", kernel_interrupt)
     router.post("/kernel/restart", kernel_restart)
     router.post("/kernel/variables", kernel_variables)
+    router.post("/kernel/env/set", kernel_env_set)
+    router.post("/kernel/env/install", kernel_env_install)
+    router.post("/kernel/envs/refresh", kernel_envs_refresh)
+    router.post("/kernel/envs/add", kernel_envs_add_custom)
+    router.post("/kernel/envs/remove", kernel_envs_remove_custom)
+    router.post("/kernel/envs/complete", kernel_envs_complete)
     router.post("/complete", complete_handler)
     router.post("/inspect", inspect_handler)
 

@@ -40,6 +40,12 @@ def _serialize_project(p: Project) -> dict:
 def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
     router = Router()
 
+    async def _get_kernel(nb_id: int):
+        """Get or create the kernel for a notebook, using its stored kernel_env."""
+        nb = await db.get_notebook(nb_id)
+        env = nb.kernel_env if nb else None
+        return await pool.get(nb_id, env)
+
     # ── notebooks ─────────────────────────────────────────────────────────
 
     async def list_notebooks(c: Context, w: Writer) -> None:
@@ -230,7 +236,7 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         except Exception:
             pass
         cell = await db.get_cell(cell_id)
-        km = await pool.get(nb_id)
+        km = await _get_kernel(nb_id)
 
         # Shield so execution + DB write complete even if connection drops
         async def _run():
@@ -261,7 +267,7 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
             w.json({"error": "invalid notebook id"}, 400)
             return
         cells = await db.get_all_cells(nb_id)
-        km = await pool.get(nb_id)
+        km = await _get_kernel(nb_id)
         results = []
         for cell in cells:
             if cell.cell_type != "code" or not cell.input.strip():
@@ -371,7 +377,7 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         except ValueError:
             w.json({"error": "invalid notebook id"}, 400)
             return
-        km = await pool.get(nb_id)
+        km = await _get_kernel(nb_id)
         variables = await km.get_variables()
         w.json({"variables": variables})
 
@@ -381,7 +387,7 @@ def api_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         except ValueError:
             w.json({"error": "invalid notebook id"}, 400)
             return
-        km = await pool.get(nb_id)
+        km = await _get_kernel(nb_id)
         await km.interrupt()
         w.json({"ok": True})
 

@@ -14,6 +14,7 @@ _RICH_MIMES = ("image/png", "image/jpeg", "image/svg+xml", "text/html", "text/pl
 class KernelManager:
     def __init__(self, python_path: str | None = None) -> None:
         self._km = _KM(kernel_name="python3")
+        self.python_path = python_path
         if python_path:
             # kernel_cmd is ignored by modern jupyter_client — override the
             # kernel spec's argv directly so the provisioner launches the
@@ -276,10 +277,14 @@ class KernelPool:
     Evicts the least-recently-used kernel when max_kernels is reached.
     """
 
-    def __init__(self, max_kernels: int = 5, python_path: str | None = None) -> None:
+    def __init__(self, max_kernels: int = 5, default_python_path: str | None = None) -> None:
         self._kernels: dict[int, KernelManager] = {}
         self._max_kernels = max_kernels
-        self._python_path = python_path
+        self._default_python_path = default_python_path
+
+    @property
+    def default_python_path(self) -> str | None:
+        return self._default_python_path
 
     async def _evict_lru(self) -> None:
         """Shut down the least-recently-used idle kernel to make room."""
@@ -294,17 +299,41 @@ class KernelPool:
         await self._kernels[nb_id].shutdown()
         del self._kernels[nb_id]
 
-    async def get(self, notebook_id: int) -> KernelManager:
+    async def get(
+        self, notebook_id: int, python_path: str | None = None
+    ) -> KernelManager:
+        """Get or create a kernel for a notebook.
+
+        If a kernel exists but with a different python_path than requested,
+        the existing one is shut down and replaced. This is how the UI
+        switches kernels mid-session.
+        """
+        target = python_path or self._default_python_path
         if notebook_id in self._kernels:
-            # Move to end (most recently used)
-            self._kernels[notebook_id] = self._kernels.pop(notebook_id)
-            return self._kernels[notebook_id]
+            existing = self._kernels[notebook_id]
+            if existing.python_path == target:
+                # Move to end (most recently used)
+                self._kernels[notebook_id] = self._kernels.pop(notebook_id)
+                return existing
+            # Env changed — replace the kernel
+            await existing.shutdown()
+            del self._kernels[notebook_id]
         if len(self._kernels) >= self._max_kernels:
             await self._evict_lru()
-        km = KernelManager(python_path=self._python_path)
+        km = KernelManager(python_path=target)
         await km.start()
         self._kernels[notebook_id] = km
         return km
+
+    async def set_env(self, notebook_id: int, python_path: str | None) -> None:
+        """Force the kernel for a notebook to use python_path, restarting if needed."""
+        if notebook_id in self._kernels:
+            existing = self._kernels[notebook_id]
+            if existing.python_path == python_path:
+                return
+            await existing.shutdown()
+            del self._kernels[notebook_id]
+        # Next .get() will create a fresh one with the new path
 
     async def restart(self, notebook_id: int) -> None:
         if notebook_id in self._kernels:

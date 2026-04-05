@@ -52,6 +52,7 @@ def _row_to_notebook(r) -> Notebook:
         project_id=r["project_id"] if "project_id" in keys else 1,
         order_index=r["order_index"] if "order_index" in keys else 0,
         updated_at=r["updated_at"],
+        kernel_env=r["kernel_env"] if "kernel_env" in keys else None,
     )
 
 
@@ -217,12 +218,24 @@ async def _migrate_v4_to_v5(conn: aiosqlite.Connection) -> None:
             )
 
 
+async def _migrate_v5_to_v6(conn: aiosqlite.Connection) -> None:
+    """V6: Add kernel_env column to notebooks (per-notebook Python interpreter)."""
+    log.info("Migration v5→v6: adding kernel_env column to notebooks")
+    async with conn.execute(
+        "SELECT COUNT(*) AS n FROM pragma_table_info('notebooks') WHERE name = 'kernel_env'"
+    ) as cur:
+        row = await cur.fetchone()
+    if row["n"] == 0:
+        await conn.execute("ALTER TABLE notebooks ADD COLUMN kernel_env TEXT")
+
+
 _MIGRATIONS = [
     (0, 1, _migrate_v0_to_v1),
     (1, 2, _migrate_v1_to_v2),
     (2, 3, _migrate_v2_to_v3),
     (3, 4, _migrate_v3_to_v4),
     (4, 5, _migrate_v4_to_v5),
+    (5, 6, _migrate_v5_to_v6),
 ]
 
 
@@ -263,14 +276,14 @@ class Database:
 
     async def get_all_notebooks(self) -> list[Notebook]:
         async with self._conn.execute(
-            "SELECT id, name, project_id, order_index, updated_at FROM notebooks ORDER BY order_index"
+            "SELECT id, name, project_id, order_index, updated_at, kernel_env FROM notebooks ORDER BY order_index"
         ) as cur:
             rows = await cur.fetchall()
         return [_row_to_notebook(r) for r in rows]
 
     async def get_notebook(self, nb_id: int) -> Notebook | None:
         async with self._conn.execute(
-            "SELECT id, name, project_id, order_index, updated_at FROM notebooks WHERE id = ?", (nb_id,)
+            "SELECT id, name, project_id, order_index, updated_at, kernel_env FROM notebooks WHERE id = ?", (nb_id,)
         ) as cur:
             r = await cur.fetchone()
         if not r:
@@ -283,6 +296,13 @@ class Database:
         ) as cur:
             r = await cur.fetchone()
         return r["id"] if r else None
+
+    async def set_notebook_kernel_env(self, nb_id: int, kernel_env: str | None) -> None:
+        await self._conn.execute(
+            "UPDATE notebooks SET kernel_env = ?, updated_at = datetime('now') WHERE id = ?",
+            (kernel_env, nb_id),
+        )
+        await self._conn.commit()
 
     async def rename_notebook(self, nb_id: int, name: str) -> None:
         await self._conn.execute(
@@ -551,7 +571,7 @@ class Database:
 
     async def get_notebooks_by_project(self, project_id: int) -> list[Notebook]:
         async with self._conn.execute(
-            "SELECT id, name, project_id, order_index, updated_at FROM notebooks "
+            "SELECT id, name, project_id, order_index, updated_at, kernel_env FROM notebooks "
             "WHERE project_id = ? ORDER BY order_index",
             (project_id,),
         ) as cur:

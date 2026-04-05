@@ -12,6 +12,7 @@ from stario.telemetry.core import Span
 
 from grokbook.api import api_router
 from grokbook.db import Database
+from grokbook import envs
 from grokbook.handlers import app_router
 from grokbook.kernel import KernelPool
 
@@ -19,6 +20,7 @@ from grokbook.kernel import KernelPool
 def make_bootstrap(db_path: Path, python_path: str | None = None):
     @asynccontextmanager
     async def bootstrap(app: Stario, span: Span):
+        nonlocal python_path
         db = await Database.connect(str(db_path))
 
         # Create welcome notebook on first run
@@ -26,7 +28,31 @@ def make_bootstrap(db_path: Path, python_path: str | None = None):
 
         await ensure_welcome_notebook(db)
 
-        pool = KernelPool(python_path=python_path)
+        # Discover available Python environments (uv + kernelspecs + cwd .venv)
+        await envs.refresh()
+
+        # Auto-pick a default interpreter if --python wasn't supplied
+        if python_path is None:
+            default_env = await envs.pick_default(cwd=Path.cwd())
+            if default_env is not None:
+                python_path = default_env.path
+                if not default_env.has_ipykernel:
+                    print(f"Installing ipykernel into {default_env.name}…")
+                    ok = False
+                    async for kind, line in envs.install_ipykernel(default_env.path):
+                        if kind == "done":
+                            ok = line == "ok"
+                            if not ok:
+                                print(f"  WARNING: {line}")
+                        else:
+                            print(f"  {line}")
+                    if ok:
+                        await envs.refresh()
+                    else:
+                        print("  Kernel will start, but ipykernel import may fail.")
+                print(f"Using kernel: {default_env.name} ({default_env.path})")
+
+        pool = KernelPool(default_python_path=python_path)
         relay: Relay[str] = Relay()
 
         static_dir = Path(__file__).parent / "static"

@@ -15,6 +15,7 @@ class Notebook:
     project_id: int = 1
     order_index: int = 0
     updated_at: str = ""
+    kernel_env: str | None = None
 
 
 @dataclass
