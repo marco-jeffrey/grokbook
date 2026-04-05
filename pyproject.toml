@@ -5,7 +5,20 @@ description = "Interactive notebook server for learning computer science"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.14"
+authors = [{ name = "Marco Jeffrey Pansa", email = "TODO@example.com" }]
 keywords = ["notebook", "jupyter", "ipython", "datastar", "sse", "reactive", "education"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Education",
+    "Topic :: Scientific/Engineering",
+    "Intended Audience :: Education",
+    "Intended Audience :: Developers",
+    "Framework :: Jupyter",
+    "Environment :: Web Environment",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "stario==2.3.0",
     "jupyter-client>=8.0.0",
@@ -21,6 +34,11 @@ dependencies = [
 
 [project.scripts]
 grokbook = "grokbook.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/marco-jeffrey/grokbook"
+Repository = "https://github.com/marco-jeffrey/grokbook"
+Issues = "https://github.com/marco-jeffrey/grokbook/issues"
 
 [build-system]
 requires = ["setuptools>=75.0"]

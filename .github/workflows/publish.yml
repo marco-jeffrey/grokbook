@@ -1,0 +1,58 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build wheel + sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.14
+        run: uv python install 3.14
+
+      - name: Build distribution
+        run: uv build
+
+      - name: Verify wheel contains static assets
+        run: |
+          uv run python -c "
+          import zipfile, glob, sys
+          wheel = glob.glob('dist/*.whl')[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          want = ['grokbook/static/js/app.js', 'grokbook/static/js/codemirror.js']
+          missing = [w for w in want if w not in names]
+          if missing:
+              print('MISSING static assets in wheel:', missing)
+              sys.exit(1)
+          print('wheel ok, contains:', len(names), 'files')
+          "
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI via trusted publishing
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
