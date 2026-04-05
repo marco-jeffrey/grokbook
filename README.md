@@ -9,11 +9,12 @@ Requires **Python 3.14+** and [uv](https://docs.astral.sh/uv/). uv will auto-ins
 ### Run instantly (recommended)
 
 ```bash
-cd your-project/          # a dir with .venv, pyproject.toml, etc.
 uvx grokbook
 ```
 
-That's it. Opens the notebook UI on [localhost:8080](http://localhost:8080) and the MCP server on port 8081. Grokbook auto-detects your project's `.venv` as the kernel and installs `ipykernel` into it if needed. A welcome notebook is created on first run.
+That's it. Opens the notebook UI on [localhost:8080](http://localhost:8080) and the MCP server on port 8081. A welcome notebook is created on first run.
+
+If you `cd` into a project directory with a `.venv` first, grokbook auto-picks that `.venv` as the kernel so your project's libraries are available. Otherwise, you pick a kernel from the `kernel:` dropdown in the header (or paste any Python path).
 
 ### Install permanently
 
