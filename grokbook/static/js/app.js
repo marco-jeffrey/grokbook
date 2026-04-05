@@ -6,6 +6,7 @@
   var _mode = 'command';       // 'command' or 'edit'
   var _selectedCellId = null;  // currently selected cell in command mode
   var _lastDTime = 0;          // for dd (double-d) delete
+  var _lastGTime = 0;          // for gg (double-g) go to top
 
   // CM6 editor registry: cellId → {view, getDoc, setDoc, focus, destroy}
   window._cmEditors = new Map();
@@ -52,8 +53,27 @@
         if (target) {
           target.classList.add('ring-2', 'ring-indigo-500/50');
         }
-        container.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        _scrollCellIntoView(container);
       }
+    }
+  }
+
+  function _scrollCellIntoView(container) {
+    // Account for the 48px fixed header
+    var headerH = 48;
+    var rect = container.getBoundingClientRect();
+    var padding = 16;
+    if (rect.top < headerH + padding) {
+      // Cell top is above (or under) the header — scroll up so top is visible
+      window.scrollBy({ top: rect.top - headerH - padding, behavior: 'smooth' });
+    } else if (rect.bottom > window.innerHeight - padding) {
+      // Cell bottom is below viewport — scroll just enough to reveal it,
+      // but never push the top under the header
+      var delta = Math.min(
+        rect.bottom - window.innerHeight + padding,
+        rect.top - headerH - padding
+      );
+      window.scrollBy({ top: delta, behavior: 'smooth' });
     }
   }
 
@@ -507,6 +527,24 @@
       if (key === 'k' || key === 'ArrowUp') {
         e.preventDefault();
         selectAdjacentCell(-1);
+        return;
+      }
+      if (key === 'G') {
+        e.preventDefault();
+        var allIds = getAllCellIds();
+        if (allIds.length) selectCell(allIds[allIds.length - 1]);
+        return;
+      }
+      if (key === 'g') {
+        e.preventDefault();
+        var now = Date.now();
+        if (now - _lastGTime < 500) {
+          var allIds = getAllCellIds();
+          if (allIds.length) selectCell(allIds[0]);
+          _lastGTime = 0;
+        } else {
+          _lastGTime = now;
+        }
         return;
       }
       if (key === 'Enter' && e.shiftKey && _selectedCellId) {
