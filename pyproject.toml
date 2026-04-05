@@ -7,7 +7,7 @@ license = "MIT"
 requires-python = ">=3.14"
 keywords = ["notebook", "jupyter", "ipython", "datastar", "sse", "reactive", "education"]
 dependencies = [
-    "stario",
+    "stario==2.3.0",
     "jupyter-client>=8.0.0",
     "ipykernel>=6.25.0",
     "aiosqlite>=0.20.0",
@@ -31,6 +31,3 @@ include = ["grokbook*"]
 
 [tool.setuptools.package-data]
 grokbook = ["static/**/*"]
-
-[tool.uv.sources]
-stario = { git = "https://github.com/Bobowski/stario.git", rev = "fd0cfae3baac78971dbf2c1f9be5a2967cd47751" }

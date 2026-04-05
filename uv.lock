@@ -432,7 +432,7 @@ requires-dist = [
     { name = "ipykernel", specifier = ">=6.25.0" },
     { name = "jupyter-client", specifier = ">=8.0.0" },
     { name = "markdown-it-py", extras = ["linkify", "plugins"], specifier = ">=4.0.0" },
-    { name = "stario", git = "https://github.com/Bobowski/stario.git?rev=fd0cfae3baac78971dbf2c1f9be5a2967cd47751" },
+    { name = "stario", specifier = "==2.3.0" },
     { name = "tqdm", specifier = ">=4.67.3" },
     { name = "typer", specifier = ">=0.15.0" },
     { name = "watchfiles", specifier = ">=1.1.1" },
@@ -1342,7 +1342,7 @@ wheels = [
 [[package]]
 name = "stario"
 version = "2.3.0"
-source = { git = "https://github.com/Bobowski/stario.git?rev=fd0cfae3baac78971dbf2c1f9be5a2967cd47751#fd0cfae3baac78971dbf2c1f9be5a2967cd47751" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
     { name = "brotli" },
@@ -1352,6 +1352,10 @@ dependencies = [
     { name = "rich" },
     { name = "watchfiles" },
     { name = "xxhash" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0a/24/c55929173c247c9e7c420afc83b7e8fc35332d1a747eed47604bddc1c13c/stario-2.3.0.tar.gz", hash = "sha256:f7a01355046cd15788d98ac51ed2edbceb798b913ab57b6cc111426cfe9fc591", size = 105968, upload-time = "2026-03-06T22:37:37.785Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b5/ba/3b782268f4d26837bdeaae9ccfd57c60ba2768265bcfa68c4eab2e6bb672/stario-2.3.0-py3-none-any.whl", hash = "sha256:b48e2fe59363df5d5364fc30b95b7e0eb6358fd3bab9b2b3bf87f4105397956b", size = 123025, upload-time = "2026-03-06T22:37:39.089Z" },
 ]
 
 [[package]]
