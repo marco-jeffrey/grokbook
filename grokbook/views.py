@@ -192,11 +192,16 @@ def header_bar():
                     "click",
                     at.post("/kernel/restart", include=["notebook_id"]),
                 ),
+                data.indicator("restarting"),
+                data.attr("disabled", "$restarting"),
                 {
                     "class": "text-xs text-zinc-500 hover:text-zinc-200 transition-colors "
-                    "cursor-pointer px-3 py-1 rounded border border-zinc-700 hover:border-zinc-500"
+                    "cursor-pointer px-3 py-1 rounded border border-zinc-700 hover:border-zinc-500 "
+                    "disabled:opacity-60 disabled:cursor-wait flex items-center gap-1.5"
                 },
-                "↺ Restart Kernel",
+                Span(data.show("$restarting"), {"style": "display:none"}, _SPINNER_SVG),
+                Span(data.show("!$restarting"), "↺ "),
+                "Restart Kernel",
             ),
         ),
     )
@@ -900,6 +905,7 @@ def page(
                 {
                     "notebook_id": nb.id,
                     "executing": False,
+                    "restarting": False,
                     "last_status": "",
                     "focus_cell": "",
                     "kernel_state": "idle",
