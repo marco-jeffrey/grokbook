@@ -217,11 +217,11 @@ async def _from_kernelspecs() -> list[EnvInfo]:
 
 
 def _from_virtualenv() -> list[EnvInfo]:
-    """$VIRTUAL_ENV and cwd .venv/venv."""
+    """$VIRTUAL_ENV, $CONDA_PREFIX, cwd .venv/venv, and cwd .pixi/envs."""
     found: list[EnvInfo] = []
     seen: set[str] = set()
 
-    def _add(py_path: Path, name: str):
+    def _add(py_path: Path, name: str, source: str = "virtualenv", glyph: str = "V"):
         if not py_path.exists():
             return
         resolved = _absolute(str(py_path))
@@ -232,18 +232,34 @@ def _from_virtualenv() -> list[EnvInfo]:
             name=name,
             path=resolved,
             version=(0, 0, 0),
-            source="virtualenv",
+            source=source,
             has_ipykernel=False,
-            label_glyph="V",
+            label_glyph=glyph,
         ))
 
+    # Activated venvs
     venv_env = os.environ.get("VIRTUAL_ENV")
     if venv_env:
         _add(Path(venv_env) / "bin" / "python", f"$VIRTUAL_ENV ({Path(venv_env).name})")
 
+    # Activated conda/pixi environments
+    conda_prefix = os.environ.get("CONDA_PREFIX")
+    if conda_prefix:
+        _add(Path(conda_prefix) / "bin" / "python", f"$CONDA_PREFIX ({Path(conda_prefix).name})", "conda", "P")
+
     cwd = Path.cwd()
+
+    # Standard venvs
     _add(cwd / ".venv" / "bin" / "python", f".venv ({cwd.name})")
     _add(cwd / "venv" / "bin" / "python", f"venv ({cwd.name})")
+
+    # Pixi environments (cwd/.pixi/envs/<name>/bin/python)
+    pixi_envs = cwd / ".pixi" / "envs"
+    if pixi_envs.is_dir():
+        for env_dir in sorted(pixi_envs.iterdir()):
+            py = env_dir / "bin" / "python"
+            if py.exists():
+                _add(py, f"pixi: {env_dir.name} ({cwd.name})", "pixi", "P")
 
     return found
 
@@ -308,7 +324,7 @@ async def discover_envs(cwd: Path | None = None) -> list[EnvInfo]:
 
     filled = await asyncio.gather(*(_fill(e) for e in merged.values()))
     # Sort: has_ipykernel desc, then source priority, then name
-    source_prio = {"custom": 0, "virtualenv": 0, "cwd": 0, "kernelspec": 1, "uv": 2, "current": 3}
+    source_prio = {"custom": 0, "virtualenv": 0, "cwd": 0, "pixi": 0, "conda": 0, "kernelspec": 1, "uv": 2, "current": 3}
     filled.sort(key=lambda e: (not e.has_ipykernel, source_prio.get(e.source, 9), e.name))
     return list(filled)
 
@@ -462,12 +478,12 @@ def find_by_path(path: str) -> EnvInfo | None:
 async def pick_default(cwd: Path | None = None) -> EnvInfo | None:
     """Pick the default env for grokbook startup.
 
-    Priority: $VIRTUAL_ENV > cwd/.venv > cwd/venv > first uv python >
-    jupyter python3 kernelspec > sys.executable.
+    Priority: $VIRTUAL_ENV > $CONDA_PREFIX > cwd/.venv > cwd/venv >
+    cwd/.pixi/envs/default > first discovered env > sys.executable.
     """
     cwd = cwd or Path.cwd()
 
-    # 1. $VIRTUAL_ENV
+    # 1. $VIRTUAL_ENV (activated venv)
     venv_env = os.environ.get("VIRTUAL_ENV")
     if venv_env:
         py = Path(venv_env) / "bin" / "python"
@@ -476,12 +492,28 @@ async def pick_default(cwd: Path | None = None) -> EnvInfo | None:
             if env:
                 return env
 
-    # 2. cwd/.venv
+    # 2. $CONDA_PREFIX (activated conda/pixi env)
+    conda_prefix = os.environ.get("CONDA_PREFIX")
+    if conda_prefix:
+        py = Path(conda_prefix) / "bin" / "python"
+        if py.exists():
+            env = await probe_env(str(py))
+            if env:
+                return env
+
+    # 3. cwd venvs
     for candidate in [cwd / ".venv" / "bin" / "python", cwd / "venv" / "bin" / "python"]:
         if candidate.exists():
             env = await probe_env(str(candidate))
             if env:
                 return env
+
+    # 4. cwd pixi default env
+    pixi_default = cwd / ".pixi" / "envs" / "default" / "bin" / "python"
+    if pixi_default.exists():
+        env = await probe_env(str(pixi_default))
+        if env:
+            return env
 
     # 3. Fall back to a discovered env — prefer uv's default
     envs = await discover_envs(cwd)
