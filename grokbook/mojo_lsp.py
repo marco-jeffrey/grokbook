@@ -116,6 +116,9 @@ class MojoLSP:
         self._pending: dict[int, asyncio.Future] = {}
         self._read_task: asyncio.Task | None = None
         self._docs: dict[str, int] = {}  # uri -> version
+        self._doc_content: dict[str, str] = {}  # uri -> last sent content
+        self._diag_events: dict[str, asyncio.Event] = {}  # uri -> fires on publishDiagnostics
+        self._last_completions: dict[str, list] = {}  # uri -> last CompletionItem[]
         self._initialized = False
         self._lock = asyncio.Lock()
         self._tmpdir: str | None = None
@@ -209,6 +212,9 @@ class MojoLSP:
         concatenation and cursor offset translation; this method just sends
         the full code and cursor to the LSP.
 
+        Fast path: if the document content hasn't changed since last call
+        (user just moved cursor), skip didChange entirely → ~0ms overhead.
+
         Returns {matches, cursor_start, cursor_end} matching grokbook's format.
         """
         if not self.available:
@@ -217,50 +223,77 @@ class MojoLSP:
         async with self._lock:
             fpath = Path(self._tmpdir) / f"nb_{doc_id}.mojo"
             uri = f"file://{fpath}"
-            version = self._docs.get(uri, 0) + 1
-            self._docs[uri] = version
-
-            # Write the file to disk — the LSP indexes from the filesystem
-            fpath.write_text(code)
-
-            # Open or update the virtual document
-            if version == 1:
-                await self._notify("textDocument/didOpen", {
-                    "textDocument": {
-                        "uri": uri,
-                        "languageId": "mojo",
-                        "version": version,
-                        "text": code,
-                    },
-                })
-            else:
-                await self._notify("textDocument/didChange", {
-                    "textDocument": {"uri": uri, "version": version},
-                    "contentChanges": [{"text": code}],
-                })
-
-            # Convert byte offset cursor_pos to (line, col)
             line, col = _offset_to_line_col(code, cursor_pos)
+            content_changed = self._doc_content.get(uri) != code
 
-            # The LSP needs time to reparse after didChange. Try up to 3
-            # times with increasing delays — the first attempt often returns
-            # empty right after a big document change.
-            result = None
-            for delay in (0.05, 0.2, 0.5):
-                await asyncio.sleep(delay)
-                result = await self._request("textDocument/completion", {
-                    "textDocument": {"uri": uri},
-                    "position": {"line": line, "character": col},
-                }, timeout=5)
-                if result is not None:
-                    items = result if isinstance(result, list) else result.get("items", [])
-                    if items:
-                        break
+            if content_changed:
+                prev_content = self._doc_content.get(uri, "")
+                version = self._docs.get(uri, 0) + 1
+                self._docs[uri] = version
+                self._doc_content[uri] = code
+
+                # Classify the change: small edits (< 10 char delta) get
+                # a short wait + cache fallback. Big structural changes
+                # (new lines, large rewrites) wait longer for fresh results.
+                small_edit = abs(len(code) - len(prev_content)) < 10
+
+                if version == 1:
+                    fpath.write_text(code)
+                    await self._notify("textDocument/didOpen", {
+                        "textDocument": {
+                            "uri": uri,
+                            "languageId": "mojo",
+                            "version": version,
+                            "text": code,
+                        },
+                    })
+                    await self._wait_for_diagnostics(uri, timeout=2.0)
+                else:
+                    await self._notify("textDocument/didChange", {
+                        "textDocument": {"uri": uri, "version": version},
+                        "contentChanges": [{"text": code}],
+                    })
+                    if small_edit:
+                        # Brief wait — fall back to cached completions if LSP
+                        # hasn't finished reparsing. Cache filtering gives
+                        # ~150ms response for normal typing.
+                        await self._wait_for_diagnostics(uri, timeout=0.15)
+                    else:
+                        # Structural change — need fresh results (dot completion,
+                        # different function, etc.). Wait longer.
+                        await self._wait_for_diagnostics(uri, timeout=1.5)
+            else:
+                small_edit = False
+
+            result = await self._request("textDocument/completion", {
+                "textDocument": {"uri": uri},
+                "position": {"line": line, "character": col},
+            }, timeout=3)
+
+            items = _extract_items(result)
+            if items:
+                self._last_completions[uri] = items
+            elif small_edit and uri in self._last_completions:
+                # LSP still reparsing — filter cached completions by the
+                # current word prefix for instant response.
+                items = self._last_completions[uri]
+                result = _filter_cached(items, code, cursor_pos)
 
         if result is None:
             return {"matches": [], "cursor_start": cursor_pos, "cursor_end": cursor_pos}
 
         return _translate_completions(result, code, cursor_pos)
+
+    async def _wait_for_diagnostics(self, uri: str, timeout: float) -> None:
+        """Wait for publishDiagnostics for uri, or timeout."""
+        ev = asyncio.Event()
+        self._diag_events[uri] = ev
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            self._diag_events.pop(uri, None)
 
     # ── LSP transport ─────────────────────────────────────────────────────
 
@@ -330,7 +363,12 @@ class MojoLSP:
                                 future.set_result(None)
                             else:
                                 future.set_result(msg.get("result"))
-                # Notifications (diagnostics etc.) — ignore for now
+                # publishDiagnostics notification → signal that reparse is done
+                elif msg.get("method") == "textDocument/publishDiagnostics":
+                    diag_uri = msg.get("params", {}).get("uri", "")
+                    ev = self._diag_events.get(diag_uri)
+                    if ev:
+                        ev.set()
         except (asyncio.CancelledError, asyncio.IncompleteReadError, ConnectionError):
             pass
 
@@ -346,6 +384,28 @@ def _offset_to_line_col(text: str, offset: int) -> tuple[int, int]:
     last_nl = before.rfind("\n")
     col = offset - last_nl - 1 if last_nl >= 0 else offset
     return line, col
+
+
+def _extract_items(result: dict | list | None) -> list:
+    """Pull the items list out of an LSP CompletionList or CompletionItem[]."""
+    if result is None:
+        return []
+    if isinstance(result, list):
+        return result
+    return result.get("items", [])
+
+
+def _filter_cached(items: list, code: str, cursor_pos: int) -> dict:
+    """Filter a cached CompletionItem list by the current word prefix."""
+    # Find the word being typed
+    i = cursor_pos
+    while i > 0 and (code[i - 1].isalnum() or code[i - 1] == "_"):
+        i -= 1
+    prefix = code[i:cursor_pos].lower()
+    if not prefix:
+        return {"items": items}  # no filtering, return all
+    filtered = [it for it in items if it.get("label", "").lower().startswith(prefix)]
+    return {"items": filtered}
 
 
 def _translate_completions(result: dict | list, code: str, cursor_pos: int) -> dict:
