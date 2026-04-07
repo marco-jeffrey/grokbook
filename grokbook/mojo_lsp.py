@@ -137,7 +137,7 @@ class MojoLSP:
         self._read_task: asyncio.Task | None = None
         self._docs: dict[str, int] = {}  # uri -> version
         self._doc_content: dict[str, str] = {}  # uri -> last sent content
-        self._last_completions: dict[str, list] = {}  # uri -> last CompletionItem[]
+        self._diag_events: dict[str, asyncio.Event] = {}
         self._initialized = False
         self._lock = asyncio.Lock()
 
@@ -281,10 +281,6 @@ class MojoLSP:
                 "position": {"line": line, "character": col},
             }, timeout=3)
 
-            items = _extract_items(result)
-            if items:
-                self._last_completions[uri] = items
-
         if result is None:
             return {"matches": [], "cursor_start": cursor_pos, "cursor_end": cursor_pos}
 
@@ -301,11 +297,7 @@ class MojoLSP:
         finally:
             self._diag_events.pop(uri, None)
 
-    @property
-    def _diag_events(self) -> dict[str, asyncio.Event]:
-        if not hasattr(self, "_diag_events_store"):
-            self._diag_events_store: dict[str, asyncio.Event] = {}
-        return self._diag_events_store
+
 
     # ── LSP transport ─────────────────────────────────────────────────────
 
@@ -395,24 +387,6 @@ def _offset_to_line_col(text: str, offset: int) -> tuple[int, int]:
     return line, col
 
 
-def _extract_items(result: dict | list | None) -> list:
-    if result is None:
-        return []
-    if isinstance(result, list):
-        return result
-    return result.get("items", [])
-
-
-def _filter_cached(items: list, code: str, cursor_pos: int) -> dict:
-    """Filter cached CompletionItems by the current word prefix."""
-    i = cursor_pos
-    while i > 0 and (code[i - 1].isalnum() or code[i - 1] == "_"):
-        i -= 1
-    prefix = code[i:cursor_pos].lower()
-    if not prefix:
-        return {"items": items}
-    filtered = [it for it in items if it.get("label", "").lower().startswith(prefix)]
-    return {"items": filtered}
 
 
 def _translate_completions(result: dict | list, code: str, cursor_pos: int) -> dict:
