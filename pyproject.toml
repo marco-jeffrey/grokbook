@@ -1,6 +1,6 @@
 [project]
 name = "grokbook"
-version = "0.1.6"
+version = "0.1.7"
 description = "Interactive notebook server for learning computer science"
 readme = "README.md"
 license = "MIT"
