@@ -659,24 +659,56 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         # Route %%mojo cells to the Mojo LSP server instead of the IPython kernel
         if code.lstrip().startswith("%%mojo"):
             from grokbook.mojo_lsp import get_mojo_lsp
-            # Pass the notebook's kernel path so the LSP binary can be found
-            # in the same pixi/conda env as the kernel
             nb = await db.get_notebook(nb_id)
             kernel_python = (nb.kernel_env if nb else None) or pool.default_python_path
             lsp = await get_mojo_lsp(kernel_python)
             if lsp:
-                # Strip the %%mojo magic line before sending to LSP
+                # Strip the %%mojo magic line from the CURRENT cell
                 first_nl = code.index("\n") if "\n" in code else len(code)
-                mojo_code = code[first_nl + 1:]
-                mojo_cursor = cursor_pos - first_nl - 1
-                if mojo_cursor >= 0:
-                    result = await lsp.complete(cell_id, mojo_code, mojo_cursor)
-                    # Shift cursor positions back to account for the stripped magic line
-                    result["cursor_start"] += first_nl + 1
-                    result["cursor_end"] += first_nl + 1
-                    w.json(result)
+                this_mojo = code[first_nl + 1:]
+                this_cursor = cursor_pos - first_nl - 1
+                if this_cursor < 0:
+                    # Cursor is on the %%mojo line itself
+                    w.json({"matches": [], "cursor_start": cursor_pos, "cursor_end": cursor_pos})
                     return
-            # LSP unavailable or cursor is on the %%mojo line itself — no completions
+
+                # Build shadow file: concatenate ALL %%mojo cells in the
+                # notebook so the LSP sees cross-cell definitions (imports,
+                # functions, structs declared in earlier cells).
+                all_cells = await db.get_all_cells(nb_id)
+                shadow_parts: list[str] = []
+                cell_shadow_start = 0
+                found = False
+                for c in all_cells:
+                    if c.cell_type != "code":
+                        continue
+                    # For the ACTIVE cell, use the live code from the POST
+                    # body (may have unsaved edits), not the stale DB version
+                    inp = code if c.id == cell_id else c.input
+                    if not inp.lstrip().startswith("%%mojo"):
+                        continue
+                    nl = inp.index("\n") if "\n" in inp else len(inp)
+                    mojo_src = inp[nl + 1:]
+                    if c.id == cell_id:
+                        cell_shadow_start = sum(len(p) + 1 for p in shadow_parts)
+                        found = True
+                    shadow_parts.append(mojo_src)
+
+                if not found:
+                    # Cell not in DB yet (unsaved new cell) — append it
+                    cell_shadow_start = sum(len(p) + 1 for p in shadow_parts)
+                    shadow_parts.append(this_mojo)
+
+                shadow_code = "\n".join(shadow_parts)
+                shadow_cursor = cell_shadow_start + this_cursor
+
+                result = await lsp.complete(nb_id, shadow_code, shadow_cursor)
+
+                # Translate cursor positions back to cell-local coords
+                result["cursor_start"] = result["cursor_start"] - cell_shadow_start + first_nl + 1
+                result["cursor_end"] = result["cursor_end"] - cell_shadow_start + first_nl + 1
+                w.json(result)
+                return
             w.json({"matches": [], "cursor_start": cursor_pos, "cursor_end": cursor_pos})
             return
 

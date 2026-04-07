@@ -201,8 +201,13 @@ class MojoLSP:
     def available(self) -> bool:
         return self._initialized and self._proc is not None and self._proc.returncode is None
 
-    async def complete(self, cell_id: int, code: str, cursor_pos: int) -> dict:
+    async def complete(self, doc_id: int, code: str, cursor_pos: int) -> dict:
         """Get completions for Mojo code at cursor_pos.
+
+        doc_id is typically the notebook_id — the shadow file is one per
+        notebook (all %%mojo cells concatenated). The handler does the
+        concatenation and cursor offset translation; this method just sends
+        the full code and cursor to the LSP.
 
         Returns {matches, cursor_start, cursor_end} matching grokbook's format.
         """
@@ -210,7 +215,7 @@ class MojoLSP:
             return {"matches": [], "cursor_start": cursor_pos, "cursor_end": cursor_pos}
 
         async with self._lock:
-            fpath = Path(self._tmpdir) / f"cell_{cell_id}.mojo"
+            fpath = Path(self._tmpdir) / f"nb_{doc_id}.mojo"
             uri = f"file://{fpath}"
             version = self._docs.get(uri, 0) + 1
             self._docs[uri] = version
@@ -234,16 +239,23 @@ class MojoLSP:
                     "contentChanges": [{"text": code}],
                 })
 
-            # Give the LSP a moment to parse the document
-            await asyncio.sleep(0.05)
-
             # Convert byte offset cursor_pos to (line, col)
             line, col = _offset_to_line_col(code, cursor_pos)
 
-            result = await self._request("textDocument/completion", {
-                "textDocument": {"uri": uri},
-                "position": {"line": line, "character": col},
-            }, timeout=5)
+            # The LSP needs time to reparse after didChange. Try up to 3
+            # times with increasing delays — the first attempt often returns
+            # empty right after a big document change.
+            result = None
+            for delay in (0.05, 0.2, 0.5):
+                await asyncio.sleep(delay)
+                result = await self._request("textDocument/completion", {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": line, "character": col},
+                }, timeout=5)
+                if result is not None:
+                    items = result if isinstance(result, list) else result.get("items", [])
+                    if items:
+                        break
 
         if result is None:
             return {"matches": [], "cursor_start": cursor_pos, "cursor_end": cursor_pos}
