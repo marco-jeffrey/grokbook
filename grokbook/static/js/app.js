@@ -204,11 +204,39 @@
     }, 1500);
   }
 
+  // Per-cell completion cache for Mojo cells — avoid re-fetching on every
+  // keystroke since the Mojo LSP takes ~500ms per response.
+  var _mojoCompletionCache = {};  // cellId -> {from, options, doc}
+
   function makeCompletionSource(cellId) {
     return async function (context) {
       var doc = context.state.doc.toString();
       var pos = context.pos;
       if (!doc.trim()) return null;
+
+      var isMojo = doc.trimStart().startsWith('%%mojo');
+
+      // For Mojo cells: use cached completions when the user is just
+      // typing within a word (prefix filtering is instant). Only fetch
+      // fresh completions on trigger characters (dot, space after import)
+      // or when no cache exists.
+      if (isMojo) {
+        var cache = _mojoCompletionCache[cellId];
+        var word = context.matchBefore(/[\w]*/);
+        var triggerChar = pos > 0 ? doc[pos - 1] : '';
+        var needsFresh = !cache || triggerChar === '.' || triggerChar === ' '
+          || (cache.doc && _mojoStructureChanged(cache.doc, doc));
+
+        if (!needsFresh && cache) {
+          // Filter cached options by current prefix
+          var prefix = word ? word.text.toLowerCase() : '';
+          var filtered = prefix
+            ? cache.options.filter(function (o) { return o.label.toLowerCase().startsWith(prefix); })
+            : cache.options;
+          return filtered.length ? { from: word ? word.from : pos, options: filtered } : null;
+        }
+      }
+
       try {
         var res = await fetch('/complete', {
           method: 'POST',
@@ -222,16 +250,29 @@
         });
         var d = await res.json();
         if (!d.matches || !d.matches.length) return null;
-        return {
-          from: d.cursor_start,
-          options: d.matches.map(function (m) {
-            return { label: m, type: 'variable' };
-          })
-        };
+        var options = d.matches.map(function (m) {
+          return { label: m, type: 'variable' };
+        });
+        var result = { from: d.cursor_start, options: options };
+
+        // Cache for Mojo cells
+        if (isMojo) {
+          _mojoCompletionCache[cellId] = { from: d.cursor_start, options: options, doc: doc };
+        }
+
+        return result;
       } catch (_) {
         return null;
       }
     };
+  }
+
+  function _mojoStructureChanged(oldDoc, newDoc) {
+    // Detect if the change is structural (new lines, large edit) vs. just
+    // typing within a word. Structural changes invalidate the cache.
+    if (Math.abs(oldDoc.length - newDoc.length) > 10) return true;
+    if (oldDoc.split('\n').length !== newDoc.split('\n').length) return true;
+    return false;
   }
 
   function showSignature(cellId, view) {
