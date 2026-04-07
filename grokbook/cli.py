@@ -7,6 +7,14 @@ import sys
 from pathlib import Path
 
 import typer
+from importlib.metadata import version as _pkg_version
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"grokbook {_pkg_version('grokbook')}")
+        raise typer.Exit()
+
 
 app = typer.Typer(
     name="grokbook",
@@ -182,6 +190,7 @@ def mcp(
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
+    version: bool = typer.Option(None, "--version", "-V", callback=_version_callback, is_eager=True, help="Show version and exit."),
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address for both servers"),
     port: int = typer.Option(8080, "--port", "-p", help="Notebook server port"),
     mcp_port: int = typer.Option(8081, "--mcp-port", help="MCP server port"),
