@@ -23,8 +23,18 @@ log = logging.getLogger(__name__)
 _CONTENT_LENGTH = b"Content-Length: "
 
 
-def _find_mojo_lsp() -> str | None:
-    """Locate the mojo-lsp-server binary."""
+def _find_mojo_lsp(kernel_python: str | None = None) -> str | None:
+    """Locate the mojo-lsp-server binary.
+
+    If kernel_python is provided (the notebook's active kernel path),
+    check its bin/ directory first — if the kernel is a pixi/conda env
+    with Mojo, the LSP server lives right next to Python.
+    """
+    # 0. Same bin dir as the active kernel (pixi/conda envs bundle mojo here)
+    if kernel_python:
+        candidate = Path(kernel_python).parent / "mojo-lsp-server"
+        if candidate.exists():
+            return str(candidate)
     # 1. On PATH
     found = shutil.which("mojo-lsp-server")
     if found:
@@ -62,9 +72,9 @@ class MojoLSP:
         self._lock = asyncio.Lock()
         self._tmpdir: str | None = None
 
-    async def start(self) -> bool:
+    async def start(self, kernel_python: str | None = None) -> bool:
         """Start the LSP server. Returns False if mojo-lsp-server not found."""
-        binary = _find_mojo_lsp()
+        binary = _find_mojo_lsp(kernel_python)
         if not binary:
             log.info("mojo-lsp-server not found — Mojo completions disabled")
             return False
@@ -294,8 +304,12 @@ def _translate_completions(result: dict | list, code: str, cursor_pos: int) -> d
 _instance: MojoLSP | None = None
 
 
-async def get_mojo_lsp() -> MojoLSP | None:
-    """Get or create the singleton MojoLSP. Returns None if unavailable."""
+async def get_mojo_lsp(kernel_python: str | None = None) -> MojoLSP | None:
+    """Get or create the singleton MojoLSP. Returns None if unavailable.
+
+    Pass kernel_python (the notebook's active kernel path) so the LSP
+    binary can be found relative to a pixi/conda env's bin directory.
+    """
     global _instance
     if _instance is not None:
         if _instance.available:
@@ -303,7 +317,7 @@ async def get_mojo_lsp() -> MojoLSP | None:
         # Server died — try restarting
         _instance = None
     lsp = MojoLSP()
-    ok = await lsp.start()
+    ok = await lsp.start(kernel_python)
     if ok:
         _instance = lsp
         return lsp

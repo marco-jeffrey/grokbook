@@ -659,7 +659,11 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         # Route %%mojo cells to the Mojo LSP server instead of the IPython kernel
         if code.lstrip().startswith("%%mojo"):
             from grokbook.mojo_lsp import get_mojo_lsp
-            lsp = await get_mojo_lsp()
+            # Pass the notebook's kernel path so the LSP binary can be found
+            # in the same pixi/conda env as the kernel
+            nb = await db.get_notebook(nb_id)
+            kernel_python = (nb.kernel_env if nb else None) or pool.default_python_path
+            lsp = await get_mojo_lsp(kernel_python)
             if lsp:
                 # Strip the %%mojo magic line before sending to LSP
                 first_nl = code.index("\n") if "\n" in code else len(code)
