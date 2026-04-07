@@ -65,6 +65,8 @@ def make_bootstrap(db_path: Path, python_path: str | None = None):
             yield
         finally:
             await pool.shutdown_all()
+            from grokbook.mojo_lsp import shutdown_mojo_lsp
+            await shutdown_mojo_lsp()
             await db.close()
 
     return bootstrap

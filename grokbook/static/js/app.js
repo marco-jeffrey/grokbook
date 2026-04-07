@@ -216,7 +216,8 @@
           body: JSON.stringify({
             code: doc,
             cursor_pos: pos,
-            notebook_id: parseInt(nbId())
+            notebook_id: parseInt(nbId()),
+            cell_id: parseInt(cellId)
           })
         });
         var d = await res.json();

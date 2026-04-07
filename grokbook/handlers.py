@@ -652,8 +652,32 @@ def app_router(db: Database, pool: KernelPool, relay: Relay[str]) -> Router:
         if not nb_id:
             w.json({"matches": [], "cursor_start": 0, "cursor_end": 0})
             return
+        code = body.get("code", "")
+        cursor_pos = body.get("cursor_pos", 0)
+        cell_id = body.get("cell_id", 0)
+
+        # Route %%mojo cells to the Mojo LSP server instead of the IPython kernel
+        if code.lstrip().startswith("%%mojo"):
+            from grokbook.mojo_lsp import get_mojo_lsp
+            lsp = await get_mojo_lsp()
+            if lsp:
+                # Strip the %%mojo magic line before sending to LSP
+                first_nl = code.index("\n") if "\n" in code else len(code)
+                mojo_code = code[first_nl + 1:]
+                mojo_cursor = cursor_pos - first_nl - 1
+                if mojo_cursor >= 0:
+                    result = await lsp.complete(cell_id, mojo_code, mojo_cursor)
+                    # Shift cursor positions back to account for the stripped magic line
+                    result["cursor_start"] += first_nl + 1
+                    result["cursor_end"] += first_nl + 1
+                    w.json(result)
+                    return
+            # LSP unavailable or cursor is on the %%mojo line itself — no completions
+            w.json({"matches": [], "cursor_start": cursor_pos, "cursor_end": cursor_pos})
+            return
+
         km = await _get_kernel(nb_id)
-        result = await km.complete(body.get("code", ""), body.get("cursor_pos", 0))
+        result = await km.complete(code, cursor_pos)
         w.json(result)
 
     async def inspect_handler(c: Context, w: Writer) -> None:
