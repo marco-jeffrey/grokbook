@@ -59,6 +59,54 @@ def _find_mojo_lsp(kernel_python: str | None = None) -> str | None:
     return None
 
 
+def _build_lsp_env(binary: str) -> dict[str, str]:
+    """Build an environment dict for the LSP subprocess.
+
+    The critical variable is MODULAR_HOME — without it the LSP can't find
+    the Mojo stdlib ('unable to locate module std'). For pixi/conda envs,
+    MODULAR_HOME lives at <prefix>/share/max.
+    """
+    env = os.environ.copy()
+    bin_dir = Path(binary).parent
+    prefix = bin_dir.parent  # e.g. .pixi/envs/default
+
+    # Set MODULAR_HOME if not already set
+    if "MODULAR_HOME" not in env:
+        modular_home = prefix / "share" / "max"
+        if modular_home.is_dir():
+            env["MODULAR_HOME"] = str(modular_home)
+
+    # Ensure the env's bin is on PATH (for any tools the LSP shells out to)
+    env["PATH"] = str(bin_dir) + ":" + env.get("PATH", "")
+
+    # Set CONDA_PREFIX if it looks like a conda/pixi env
+    if (prefix / "conda-meta").is_dir():
+        env["CONDA_PREFIX"] = str(prefix)
+
+    return env
+
+
+def _find_project_root(kernel_python: str | None) -> str | None:
+    """Try to find the pixi/mojo project root for rootUri.
+
+    Walks up from the kernel's env prefix looking for pixi.toml or mojoproject.toml.
+    Falls back to cwd if it has one.
+    """
+    # Check cwd first
+    for name in ("pixi.toml", "mojoproject.toml"):
+        if (Path.cwd() / name).exists():
+            return str(Path.cwd())
+    # Check relative to kernel path
+    if kernel_python:
+        # .pixi/envs/default/bin/python → walk up to find pixi.toml
+        d = Path(kernel_python).parent
+        for _ in range(6):
+            d = d.parent
+            if (d / "pixi.toml").exists() or (d / "mojoproject.toml").exists():
+                return str(d)
+    return None
+
+
 class MojoLSP:
     """Async LSP client for mojo-lsp-server over stdio."""
 
@@ -82,12 +130,19 @@ class MojoLSP:
         import tempfile
         self._tmpdir = tempfile.mkdtemp(prefix="grokbook-mojo-")
 
+        # The LSP needs MODULAR_HOME to find the Mojo stdlib. Derive it
+        # from the binary's env prefix (pixi/conda envs store it at
+        # <prefix>/share/max). Also set PATH and CONDA_PREFIX so the
+        # LSP can resolve any additional tooling.
+        env = _build_lsp_env(binary)
+
         try:
             self._proc = await asyncio.create_subprocess_exec(
                 binary,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
         except (OSError, FileNotFoundError) as e:
             log.warning("Failed to start mojo-lsp-server: %s", e)
@@ -95,7 +150,9 @@ class MojoLSP:
 
         self._read_task = asyncio.create_task(self._read_loop())
 
-        # LSP initialize handshake
+        # LSP initialize handshake. Use the pixi/mojo project root as
+        # rootUri when available — this lets the LSP resolve project imports.
+        project_root = _find_project_root(kernel_python) or self._tmpdir
         resp = await self._request("initialize", {
             "processId": os.getpid(),
             "capabilities": {
@@ -105,8 +162,8 @@ class MojoLSP:
                     },
                 },
             },
-            "rootUri": f"file://{self._tmpdir}",
-            "workspaceFolders": [{"uri": f"file://{self._tmpdir}", "name": "grokbook"}],
+            "rootUri": f"file://{project_root}",
+            "workspaceFolders": [{"uri": f"file://{project_root}", "name": "grokbook"}],
         })
         if resp is None:
             log.warning("mojo-lsp-server initialize failed")
@@ -153,9 +210,13 @@ class MojoLSP:
             return {"matches": [], "cursor_start": cursor_pos, "cursor_end": cursor_pos}
 
         async with self._lock:
-            uri = f"file://{self._tmpdir}/cell_{cell_id}.mojo"
+            fpath = Path(self._tmpdir) / f"cell_{cell_id}.mojo"
+            uri = f"file://{fpath}"
             version = self._docs.get(uri, 0) + 1
             self._docs[uri] = version
+
+            # Write the file to disk — the LSP indexes from the filesystem
+            fpath.write_text(code)
 
             # Open or update the virtual document
             if version == 1:
@@ -172,6 +233,9 @@ class MojoLSP:
                     "textDocument": {"uri": uri, "version": version},
                     "contentChanges": [{"text": code}],
                 })
+
+            # Give the LSP a moment to parse the document
+            await asyncio.sleep(0.05)
 
             # Convert byte offset cursor_pos to (line, col)
             line, col = _offset_to_line_col(code, cursor_pos)
